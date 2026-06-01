@@ -76,6 +76,10 @@ module npu_dma_engine #(
   logic        reg_trigger;
   logic        busy_q;
 
+  // Performance counters
+  logic [31:0] dma_read_count;
+  logic [31:0] dma_write_count;
+
   assign ctrl_req_ready_o = !ctrl_rsp_valid_o;
   
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -117,6 +121,8 @@ module npu_dma_engine #(
             4'h4: ctrl_rsp_data_o <= reg_stride_src;
             4'h5: ctrl_rsp_data_o <= reg_stride_dst;
             4'h7: ctrl_rsp_data_o <= {31'd0, busy_q};
+            4'h8: ctrl_rsp_data_o <= dma_read_count;
+            4'h9: ctrl_rsp_data_o <= dma_write_count;
             default: ctrl_rsp_data_o <= '0;
           endcase
         end
@@ -161,6 +167,8 @@ module npu_dma_engine #(
       y_rem_q <= '0;
       fifo_valid <= 1'b0;
       fifo_data <= '0;
+      dma_read_count <= '0;
+      dma_write_count <= '0;
     end else begin
       state_q <= state_d;
       curr_src_q <= curr_src_d;
@@ -172,8 +180,11 @@ module npu_dma_engine #(
       if (axi_r_valid_i && axi_r_ready_o) begin
         fifo_valid <= 1'b1;
         fifo_data <= axi_r_data_i;
+        dma_read_count <= dma_read_count + 1;
       end else if (tcdm_req_valid_o && tcdm_req_ready_i) begin
         fifo_valid <= 1'b0;
+        if (tcdm_req_write_o)
+          dma_write_count <= dma_write_count + 1;
       end
     end
   end

@@ -6,3 +6,6 @@ work_verilator/
 *.bin
 *.out
 *.asm
+*.d
+*.log
+*.vcd

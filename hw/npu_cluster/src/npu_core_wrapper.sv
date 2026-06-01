@@ -44,6 +44,10 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
   logic signed [7:0] act_buf [128];
   logic signed [7:0] wgt_buf [128];
 
+  // Performance counters
+  logic [31:0] mac_active_cycles;
+  logic [31:0] total_cycles;
+
   // Core signals
   logic core_valid;
   logic core_clear_acc;
@@ -52,7 +56,7 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
   logic [31:0] core_out_act;
 
   core_cfg_t core_cfg;
-  assign core_cfg.act_type = ACT_RELU;
+  assign core_cfg.act_type = act_type_e'(reg_ctrl[10:8]);
   assign core_cfg.output_scale = 1;
   assign core_cfg.output_zero_point = 0;
   assign core_cfg.shift_amount = 0;
@@ -122,6 +126,8 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
             8'h0C: mmio_rsp_data_o <= reg_out_ptr;
             8'h10: mmio_rsp_data_o <= {31'd0, (state_q != IDLE)};
             8'h14: mmio_rsp_data_o <= reg_stride_slide;
+            8'h18: mmio_rsp_data_o <= mac_active_cycles;
+            8'h1C: mmio_rsp_data_o <= total_cycles;
             default: mmio_rsp_data_o <= 32'hDEADBEEF;
           endcase
           $display("[RTL Trace] Core %0d Read Addr: %x, Data: %x", CoreId, mmio_req_addr_i, mmio_rsp_data_o);
@@ -275,6 +281,19 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
       wgt_ptr_q <= wgt_ptr_d;
       fetch_cnt_q <= fetch_cnt_d;
       slide_idx_q <= slide_idx_d;
+    end
+  end
+
+  // Performance counters
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      mac_active_cycles <= 0;
+      total_cycles <= 0;
+    end else begin
+      total_cycles <= total_cycles + 1;
+      if (core_valid && core_ready) begin
+        mac_active_cycles <= mac_active_cycles + 1;
+      end
     end
   end
 

@@ -109,7 +109,11 @@ public:
         while (!(dut->core_req_ready_o & (1 << cluster_id))) tick();
         tick();
         dut->core_req_valid_i &= ~(1 << cluster_id);
-        while (!(dut->core_rsp_valid_o & (1 << cluster_id))) tick();
+        
+        // TCDM interconnect does not generate response for writes
+        if (!(addr >= TCDM_BASE && addr < TCDM_BASE + 0x10000000)) {
+            while (!(dut->core_rsp_valid_o & (1 << cluster_id))) tick();
+        }
         tick();
     }
 

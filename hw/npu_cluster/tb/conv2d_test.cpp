@@ -93,7 +93,11 @@ void mem_write(uint32_t addr, uint32_t data) {
     while (!dut->core_req_ready_o) tick();
     tick();
     dut->core_req_valid_i = 0;
-    while (!dut->core_rsp_valid_o) tick();
+    
+    // TCDM interconnect does not generate response for writes
+    if (!(addr >= TCDM_BASE && addr < TCDM_BASE + 0x10000000)) {
+        while (!dut->core_rsp_valid_o) tick();
+    }
     tick();
     cout << "[FW Trace] mem_write rsp" << endl;
 }

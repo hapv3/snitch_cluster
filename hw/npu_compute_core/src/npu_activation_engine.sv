@@ -58,6 +58,16 @@ module npu_activation_engine import npu_compute_core_pkg::*; (
         ACT_SIGMOID: begin
           activated[l] = 8'sd0;
         end
+        ACT_LEAKY_RELU: begin
+          if (clipped[l] > 16'sd127) activated[l] = 8'sd127;
+          else if (clipped[l] < 16'sd0) begin
+            // Leaky ReLU: alpha ≈ 0.125 (arithmetic right shift by 3)
+            automatic logic signed [15:0] leak = clipped[l] >>> 3;
+            if (leak < -16'sd128) activated[l] = -8'sd128;
+            else activated[l] = 8'(leak);
+          end
+          else activated[l] = 8'(clipped[l]);
+        end
         default: activated[l] = 8'sd0;
       endcase
     end

@@ -20,11 +20,12 @@ package npu_compute_core_pkg;
   localparam NpuTcdmAddrWidth = 32;
 
   /// Activation function types
-  typedef enum logic [1:0] {
-    ACT_NONE    = 2'b00,
-    ACT_RELU    = 2'b01,
-    ACT_RELU6   = 2'b10,
-    ACT_SIGMOID = 2'b11 // LUT-based
+  typedef enum logic [2:0] {
+    ACT_NONE       = 3'b000,
+    ACT_RELU       = 3'b001,
+    ACT_RELU6      = 3'b010,
+    ACT_SIGMOID    = 3'b011, // LUT-based
+    ACT_LEAKY_RELU = 3'b100  // alpha ≈ 0.125 (>>3)
   } act_type_e;
 
   /// Configuration structure for a compute core
