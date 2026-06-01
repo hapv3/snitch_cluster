@@ -1,0 +1,13 @@
+# Yosys synthesis check script
+read_verilog -sv -I../src ../src/npu_compute_core_pkg.sv
+read_verilog -sv -I../src ../src/npu_mac_array.sv
+read_verilog -sv -I../src ../src/npu_activation_engine.sv
+read_verilog -sv -I../src ../src/npu_compute_core.sv
+read_verilog -sv -I../src ../src/npu_ssr_interface.sv
+read_verilog -sv -I../src ../src/npu_frep_controller.sv
+
+# Check hierarchy
+hierarchy -check -top npu_compute_core
+
+# Perform synthesis (coarse-grained to check syntax and basic logic mapping)
+synth -top npu_compute_core
