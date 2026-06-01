@@ -20,13 +20,13 @@
 static int32_t mac_reference_model(
     const int8_t activations[],
     const int8_t weights[],
-    int num_macs,
+    int lane,
     bool clear_acc,
     int32_t prev_acc
 ) {
     int32_t acc = clear_acc ? 0 : prev_acc;
-    for (int i = 0; i < num_macs; i++) {
-        acc += (int32_t)activations[i] * (int32_t)weights[i];
+    for (int i = 0; i < 32; i++) {
+        acc += (int32_t)activations[i] * (int32_t)weights[lane * 32 + i];
     }
     return acc;
 }
@@ -39,14 +39,15 @@ public:
     Vnpu_mac_array* dut;
     VerilatedVcdC*  trace;
     uint64_t        sim_time;
-    int32_t         ref_acc;
+    int32_t         ref_acc[4];
     int             pass_count;
     int             fail_count;
     int             total_count;
 
     static constexpr int NUM_MACS = 128;
 
-    MacArrayTB() : sim_time(0), ref_acc(0), pass_count(0), fail_count(0), total_count(0) {
+    MacArrayTB() : sim_time(0), pass_count(0), fail_count(0), total_count(0) {
+        for (int i=0; i<4; i++) ref_acc[i] = 0;
         dut = new Vnpu_mac_array;
         trace = new VerilatedVcdC;
         dut->trace(trace, 99);
@@ -96,7 +97,9 @@ public:
         dut->clear_acc_i = 0;
 
         // Compute reference
-        ref_acc = mac_reference_model(act, wgt, NUM_MACS, clear_acc, ref_acc);
+        for (int l = 0; l < 4; l++) {
+            ref_acc[l] = mac_reference_model(act, wgt, l, clear_acc, ref_acc[l]);
+        }
     }
 
     // Wait for valid_o and check result
@@ -106,13 +109,19 @@ public:
             tick();
             if (dut->valid_o) {
                 total_count++;
-                int32_t actual = (int32_t)dut->acc_o;
-                if (actual == ref_acc) {
+                bool all_match = true;
+                for (int l = 0; l < 4; l++) {
+                    int32_t actual = (int32_t)dut->acc_o[l];
+                    if (actual != ref_acc[l]) {
+                        all_match = false;
+                        printf("[FAIL #%d] Lane %d Expected=%d, Got=%d\n",
+                               total_count, l, ref_acc[l], actual);
+                    }
+                }
+                if (all_match) {
                     pass_count++;
                 } else {
                     fail_count++;
-                    printf("[FAIL #%d] Expected=%d, Got=%d\n",
-                           total_count, ref_acc, actual);
                 }
                 return;
             }

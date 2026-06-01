@@ -1,68 +1,63 @@
-// Copyright 2026 NPU IP
-// Verilator Testbench for NPU Control Core (with mini RISC-V ISS)
-
-#include "Vnpu_control_core.h"
-#include "verilated.h"
+// NPU Cluster Top Level Verilator Testbench (with RISC-V ISS)
 #include <iostream>
 #include <fstream>
-#include <vector>
-#include <map>
-#include <string>
-#include <iomanip>
+#include "Vnpu_cluster_top.h"
+#include "verilated.h"
 
 using namespace std;
 
-// Memory mappings
 #define I_SPM_BASE   0x00001000
 #define I_SPM_SIZE   0x00008000
 #define MBOX_BASE    0x40000000
-#define DMA_BASE     0x50000000
+#define DMA_BASE     0x70000000
 #define NPU_BASE     0x60000000
+#define TCDM_BASE    0x10000000
 
 uint32_t ram[I_SPM_SIZE / 4];
 uint32_t regs[32];
 uint32_t pc = 0x1000;
 
-Vnpu_control_core* dut;
+Vnpu_cluster_top* dut;
 vluint64_t main_time = 0;
 
-uint32_t tcdm_data_rsp = 0;
-bool tcdm_rsp_pending = false;
-
 void tick() {
+    // Sample signals before clock edge (representing the state AT the posedge)
+    bool ar_valid_sampled = dut->axi_ar_valid_o;
+    bool ar_ready_sampled = dut->axi_ar_ready_i;
+    bool r_valid_sampled = dut->axi_r_valid_i;
+    bool r_ready_sampled = dut->axi_r_ready_o;
+
     dut->clk_i = 1;
     dut->eval();
     main_time += 5;
-    dut->clk_i = 0;
     
-    // Simulate TCDM/DMA responses
-    if (dut->tcdm_req_valid_o) {
-        dut->tcdm_req_ready_i = 1;
-        if (!dut->tcdm_req_write_o) {
-            tcdm_rsp_pending = true;
-            if (dut->tcdm_req_addr_o == 0x50000010) { // DMA STATUS
-                tcdm_data_rsp = 0; // DMA Idle
-            } else if (dut->tcdm_req_addr_o == 0x60000000) { // NPU CTRL
-                tcdm_data_rsp = 0; // FREP Idle
-            } else {
-                tcdm_data_rsp = 0xDEADBEEF;
-            }
-        } else {
-            tcdm_rsp_pending = true;
-            tcdm_data_rsp = 0; // Ignore write data in simple simulation
-        }
-    } else {
-        dut->tcdm_req_ready_i = 0;
+    static int axi_burst_len = 0;
+    
+    // Process handshakes that occurred on this posedge
+    if (r_valid_sampled && r_ready_sampled) {
+        if (axi_burst_len > 0) axi_burst_len--;
     }
     
-    if (tcdm_rsp_pending) {
-        dut->tcdm_rsp_valid_i = 1;
-        dut->tcdm_rsp_data_i = tcdm_data_rsp;
-        tcdm_rsp_pending = false;
-    } else {
-        dut->tcdm_rsp_valid_i = 0;
+    if (ar_valid_sampled && ar_ready_sampled) {
+        axi_burst_len = dut->axi_ar_len_o + 1;
     }
 
+    // Drive outputs for the next cycle
+    if (axi_burst_len > 0) {
+        dut->axi_r_valid_i = 1;
+        dut->axi_r_data_i[0] = 0x01020304;
+        dut->axi_r_data_i[1] = 0x05060708;
+        dut->axi_r_data_i[2] = 0x090A0B0C;
+        dut->axi_r_data_i[3] = 0x0D0E0F10;
+        dut->axi_r_last_i = (axi_burst_len == 1);
+        dut->axi_ar_ready_i = 0;
+    } else {
+        dut->axi_r_valid_i = 0;
+        dut->axi_r_last_i = 0;
+        dut->axi_ar_ready_i = 1;
+    }
+
+    dut->clk_i = 0;
     dut->eval();
     main_time += 5;
 }
@@ -80,6 +75,9 @@ uint32_t mem_read(uint32_t addr) {
     while (!dut->core_rsp_valid_o) tick();
     uint32_t data = dut->core_rsp_data_o;
     tick();
+    if (addr == 0x7000001c) {
+        cout << "[FW Trace] Read DMA_STATUS: " << data << endl;
+    }
     return data;
 }
 
@@ -87,6 +85,12 @@ void mem_write(uint32_t addr, uint32_t data) {
     if (addr >= I_SPM_BASE && addr < I_SPM_BASE + I_SPM_SIZE) {
         ram[(addr - I_SPM_BASE) / 4] = data;
         return;
+    }
+    if (addr == 0x70000018) {
+        cout << "[FW Trace] Triggering DMA!" << endl;
+    }
+    if (addr == 0x60000f00) {
+        cout << "[FW Trace] Triggering Compute Cores Broadcast!" << endl;
     }
     dut->core_req_valid_i = 1;
     dut->core_req_write_i = 1;
@@ -110,20 +114,21 @@ void load_bin(const char* filename) {
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);
-    dut = new Vnpu_control_core;
+    dut = new Vnpu_cluster_top;
 
     // Reset
     dut->clk_i = 0;
     dut->rst_ni = 0;
     dut->host_rsp_ready_i = 1;
-    dut->fw_rsp_ready_i = 1;
+    dut->axi_ar_ready_i = 1;
+    dut->axi_r_valid_i = 0;
     tick(); tick();
     dut->rst_ni = 1;
     tick();
 
-    load_bin("fw/main.bin");
+    load_bin("firmware.bin");
 
-    cout << "[INFO] Started RISC-V Firmware Execution" << endl;
+    cout << "[INFO] Started RISC-V Firmware Execution in Cluster Top" << endl;
     for (int i = 0; i < 32; i++) regs[i] = 0;
     regs[2] = I_SPM_BASE + I_SPM_SIZE; // SP
 
@@ -141,7 +146,7 @@ int main(int argc, char** argv) {
         32  // K
     };
 
-    while (!Verilated::gotFinish() && inst_count < 1000) {
+    while (!Verilated::gotFinish() && inst_count < 50000) {
         if (wfi) {
             // Trigger ARM Host interaction to wake up
             cout << "[INFO] Snitch in WFI. ARM Host triggering Mailbox task..." << endl;
@@ -213,13 +218,11 @@ int main(int argc, char** argv) {
             uint32_t addr = regs[rs1] + i_imm;
             uint32_t val = mem_read(addr);
             if (rd) regs[rd] = val;
-            // cout << "LW r" << rd << " = mem[" << hex << addr << "] (" << val << ")" << endl;
         } else if (op == 0x23) { // STORE
             uint32_t addr = regs[rs1] + s_imm;
             mem_write(addr, regs[rs2]);
-            // cout << "SW mem[" << hex << addr << "] = r" << rs2 << " (" << regs[rs2] << ")" << endl;
             if (addr == MBOX_BASE + 0x04 && regs[rs2] == 2) {
-                cout << "[INFO] Firmware signaled Task Complete!" << endl;
+                cout << "[SUCCESS] Firmware signaled Task Complete! Cluster Integration Verified." << endl;
                 break;
             }
         } else if (op == 0x13) { // OP-IMM
@@ -230,7 +233,7 @@ int main(int argc, char** argv) {
             } else if (funct3 == 1) { // SLLI
                 if (rd) regs[rd] = regs[rs1] << (i_imm & 0x1F);
             }
-        } else if (op == 0x33) { // OP (including M extension)
+        } else if (op == 0x33) { // OP
             if (funct7 == 1 && funct3 == 0) { // MUL
                 if (rd) regs[rd] = regs[rs1] * regs[rs2];
             }
@@ -243,11 +246,15 @@ int main(int argc, char** argv) {
             break;
         }
 
+        if (inst_count > 5000 && inst_count % 1000 == 0) {
+            cout << "PC: " << hex << pc << " (inst count: " << dec << inst_count << ")" << endl;
+        }
+
         pc = next_pc;
         inst_count++;
     }
 
-    cout << "[INFO] Simulation completed after " << inst_count << " instructions." << endl;
+    cout << "[INFO] Simulation completed at PC " << hex << pc << " after " << dec << inst_count << " instructions." << endl;
     delete dut;
     return 0;
 }

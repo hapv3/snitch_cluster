@@ -5,3 +5,4 @@ work_verilator/
 *.hex
 *.bin
 *.out
+*.asm

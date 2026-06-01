@@ -18,17 +18,17 @@ module npu_compute_core import npu_compute_core_pkg::*; (
 
   // Stream output to TCDM (via SSR)
   output logic valid_o,
-  output logic [NpuActWidth-1:0] act_o,
+  output logic [31:0] act_o,
   input  logic ready_i
 );
 
   // Interconnect signals
   logic mac_valid;
-  logic signed [NpuAccWidth-1:0] mac_acc;
+  logic signed [NpuAccWidth-1:0] mac_acc [4];
   logic mac_ready;
   
   logic act_valid;
-  logic [NpuActWidth-1:0] act_data;
+  logic [NpuActWidth-1:0] act_data [4];
   logic act_ready;
 
   // 1. MAC Array Instantiation
@@ -58,7 +58,7 @@ module npu_compute_core import npu_compute_core_pkg::*; (
 
   // Output routing
   assign valid_o = act_valid;
-  assign act_o   = act_data;
+  assign act_o   = {act_data[3], act_data[2], act_data[1], act_data[0]};
   assign ready_o = mac_ready && act_ready; // Backpressure propagation
 
 endmodule
