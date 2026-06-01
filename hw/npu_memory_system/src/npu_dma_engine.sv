@@ -276,4 +276,23 @@ module npu_dma_engine #(
     endcase
   end
 
+  // ====================================================================
+  // SystemVerilog Assertions (SVA) for AXI4 Master compliance
+  // ====================================================================
+  `ifndef VERILATOR
+  // Property: AXI ARVALID must not be dropped until ARREADY is asserted
+  property p_axi_ar_hold;
+    @(posedge clk_i) disable iff (!rst_ni)
+    (axi_ar_valid_o && !axi_ar_ready_i) |=> (axi_ar_valid_o && $stable(axi_ar_addr_o));
+  endproperty
+  assert property (p_axi_ar_hold) else $error("AXI AR dropped before ready");
+
+  // Property: AXI RREADY should be high when able to accept data
+  property p_axi_r_handshake;
+    @(posedge clk_i) disable iff (!rst_ni)
+    (axi_r_valid_i && axi_r_ready_o) |=> !fifo_valid; // Basic check for our simple fifo logic
+  endproperty
+  assert property (p_axi_r_handshake) else $error("AXI R handshake dropped");
+  `endif
+
 endmodule

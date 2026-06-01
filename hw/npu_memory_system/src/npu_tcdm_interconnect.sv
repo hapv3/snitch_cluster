@@ -127,4 +127,51 @@ module npu_tcdm_interconnect #(
     end
   end
 
+  // ====================================================================
+  // SystemVerilog Assertions (SVA)
+  // ====================================================================
+  `ifndef VERILATOR
+  // Ensure that no two masters are granted the same bank at the same time
+  // Actually, bank_req_o[b] guarantees only 1 master is granted per bank by design (it's driven by grant_idx[b]).
+  // But we want to ensure we don't drop requests silently without stalling them.
+  
+  // Property: If a master makes a request, it must either receive a ready signal immediately
+  // or it must hold the request until ready is asserted.
+  generate
+    for (genvar m = 0; m < NumMasters; m++) begin : gen_sva_master
+      property p_hold_req_until_ready;
+        @(posedge clk_i) disable iff (!rst_ni)
+        (master_req_valid_i[m] && !master_req_ready_o[m]) |=> 
+        (master_req_valid_i[m] && $stable(master_req_addr_i[m]));
+      endproperty
+      assert property (p_hold_req_until_ready) else $error("Master %0d dropped request before ready", m);
+      
+      // Covergroup for contention
+      covergroup cg_bank_contention @(posedge clk_i);
+        coverpoint master_req_valid_i[m] {
+          bins req_active = {1};
+        }
+        coverpoint master_req_ready_o[m] {
+          bins granted = {1};
+          bins stalled = {0};
+        }
+        cross master_req_valid_i[m], master_req_ready_o[m];
+      endgroup
+      
+      cg_bank_contention cg_inst = new();
+    end
+  endgenerate
+  
+  // Property: Bank write/read requests should never go out of bounds
+  generate
+    for (genvar b = 0; b < NumBanks; b++) begin : gen_sva_bank
+      property p_valid_grant;
+        @(posedge clk_i) disable iff (!rst_ni)
+        bank_req_o[b] |-> (grant_idx[b] < NumMasters);
+      endproperty
+      assert property (p_valid_grant) else $error("Bank %0d granted to invalid master %0d", b, grant_idx[b]);
+    end
+  endgenerate
+  `endif
+
 endmodule

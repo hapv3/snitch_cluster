@@ -1,7 +1,7 @@
 # Verilator Makefile for NPU Memory Subsystem
 
 VERILATOR = verilator
-VFLAGS = --top-module npu_memory_subsystem -Wall -Wno-fatal --trace --cc -Wno-lint --build --exe
+VFLAGS = --assert --top-module npu_memory_subsystem -Wall -Wno-fatal --trace --cc -Wno-lint --build --exe
 
 RTL = ../src/npu_tcdm_bank.sv \
       ../src/npu_tcdm_interconnect.sv \

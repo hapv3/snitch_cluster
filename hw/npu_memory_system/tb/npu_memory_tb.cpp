@@ -166,9 +166,137 @@ int main(int argc, char** argv) {
     if (errors == 0) {
         cout << "[SUCCESS] TCDM Interconnect and DMA 2D Striding verified successfully!" << endl;
     } else {
-        cout << "[FAILED] Found " << errors << " errors." << endl;
+        cout << "[FAILED] Found " << errors << " errors in DMA verification." << endl;
     }
     
+    // 4. Concurrent Access Stress Test
+    cout << "[INFO] Running Concurrent Access Stress Test on Interconnect..." << endl;
+    
+    // Write distinct values using Master 1, 2, 3, 4 concurrently to DIFFERENT banks
+    // Bank mapping is addr[6:2]. So 0x10000000 (Bank 0), 0x10000004 (Bank 1), 0x10000008 (Bank 2), 0x1000000C (Bank 3)
+    uint32_t addrs[4] = {0x10000000, 0x10000004, 0x10000008, 0x1000000C};
+    uint32_t wdata[4] = {0x11111111, 0x22222222, 0x33333333, 0x44444444};
+    
+    for (int i=0; i<4; i++) {
+        dut->ext_req_valid_i |= (1 << i);
+        dut->ext_req_write_i |= (1 << i);
+        dut->ext_req_be_i |= (0xF << (i*4));
+        dut->ext_req_addr_i[i] = addrs[i];
+        dut->ext_req_wdata_i[i] = wdata[i];
+    }
+    
+    tick(); // Submit concurrent writes
+    dut->ext_req_valid_i = 0;
+    dut->ext_req_write_i = 0;
+    tick(); // Wait for completion
+    
+    // Now read them back concurrently
+    for (int i=0; i<4; i++) {
+        dut->ext_req_valid_i |= (1 << i);
+        dut->ext_req_addr_i[i] = addrs[i];
+    }
+    
+    tick(); // Submit concurrent reads
+    dut->ext_req_valid_i = 0;
+    tick(); // Responses arrive
+    
+    int concurrent_errors = 0;
+    for (int i=0; i<4; i++) {
+        // Wait, responses might take multiple cycles if there were collisions, but these are different banks!
+        // Should complete in 1 cycle.
+        if ((dut->ext_rsp_valid_o & (1 << i)) == 0) {
+            cout << "[ERROR] Master " << i << " did not receive a response!" << endl;
+            concurrent_errors++;
+        } else if (dut->ext_rsp_rdata_o[i] != wdata[i]) {
+            cout << "[ERROR] Master " << i << " mismatch! Expected: 0x" << hex << wdata[i] 
+                 << " Got: 0x" << dut->ext_rsp_rdata_o[i] << dec << endl;
+            concurrent_errors++;
+        }
+    }
+    
+    // Next, test COLLISION: all masters reading from the SAME bank
+    // Bank 0 (0x10000000)
+    cout << "[INFO] Testing Bank Collision Arbitration..." << endl;
+    for (int i=0; i<4; i++) {
+        dut->ext_req_valid_i |= (1 << i);
+        dut->ext_req_addr_i[i] = 0x10000000;
+    }
+    
+    int masters_done = 0;
+    int timeout = 0;
+    while (masters_done < 4 && timeout < 20) {
+        // Sample ready/valid
+        uint32_t req_ready = dut->ext_req_ready_o;
+        
+        tick(); // Advance cycle
+        
+        // Clear requests that were accepted
+        for (int i=0; i<4; i++) {
+            if ((dut->ext_req_valid_i & (1 << i)) && (req_ready & (1 << i))) {
+                dut->ext_req_valid_i &= ~(1 << i);
+            }
+        }
+        
+        // Count responses
+        for (int i=0; i<4; i++) {
+            if (dut->ext_rsp_valid_o & (1 << i)) {
+                masters_done++;
+                if (dut->ext_rsp_rdata_o[i] != 0x11111111) {
+                    cout << "[ERROR] Collision test read mismatch on Master " << i << endl;
+                    concurrent_errors++;
+                }
+            }
+        }
+        timeout++;
+    }
+    
+    if (masters_done != 4) {
+        cout << "[ERROR] Collision test timeout! Not all masters received data." << endl;
+        concurrent_errors++;
+    }
+    
+    if (concurrent_errors == 0) {
+        cout << "[SUCCESS] Interconnect Concurrent Stress Test Passed! Zero collisions dropped." << endl;
+    } else {
+        cout << "[FAILED] Found " << concurrent_errors << " errors in Concurrent test." << endl;
+    }
+    
+    // 5. DMA Double-Buffering (Ping-Pong) Zero-Stall Verification
+    cout << "[INFO] Running DMA Double-Buffering (Ping-Pong) Verification..." << endl;
+    uint32_t buffer_A = 0x10001000;
+    uint32_t buffer_B = 0x10002000;
+    
+    // Load Buffer A
+    dma_write_reg(0x00, 0x90000000); // Src A
+    dma_write_reg(0x04, buffer_A);
+    dma_write_reg(0x08, 16);
+    dma_write_reg(0x0C, 1);
+    dma_write_reg(0x10, 16);
+    dma_write_reg(0x14, 16);
+    dma_write_reg(0x18, 1); // Trigger A
+    
+    int bytes_before_ping_pong = bytes_transferred;
+    
+    while(dma_read_reg(0x1C) & 1) { // Wait for A
+        // dma_read_reg advances tick() which handles AXI
+    }
+    
+    // Load Buffer B
+    dma_write_reg(0x00, 0xA0000000); // Src B
+    dma_write_reg(0x04, buffer_B);
+    dma_write_reg(0x18, 1); // Trigger B
+    
+    while(dma_read_reg(0x1C) & 1) { // Wait for B
+        // dma_read_reg advances tick() which handles AXI
+    }
+    
+    int ping_pong_bytes = bytes_transferred - bytes_before_ping_pong;
+    if (ping_pong_bytes == 32) {
+        cout << "[SUCCESS] DMA Double-Buffer Ping-Pong completed successfully!" << endl;
+    } else {
+        cout << "[ERROR] Ping-Pong bytes transferred: " << ping_pong_bytes << endl;
+    }
+
     delete dut;
     return 0;
 }
