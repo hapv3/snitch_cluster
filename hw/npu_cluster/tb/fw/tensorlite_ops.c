@@ -48,6 +48,8 @@
 #define ACT_RELU6      (2 << 8)
 #define ACT_SIGMOID    (3 << 8)
 #define ACT_LEAKY_RELU (4 << 8)
+#define ACT_SILU       (5 << 8)
+#define ACT_MISH       (6 << 8)
 
 // ========== Utility ==========
 static volatile unsigned int* tcdm = (volatile unsigned int*)TCDM_BASE;
@@ -521,13 +523,119 @@ static int test_pad(void) {
     return errors;
 }
 
+
+// ========== Test 15: SIGMOID (Hardware LUT) ==========
+static int test_sigmoid(void) {
+    signed char test_vals[4] = {0, 32, -32, 16};
+    for (int i = 0; i < 4; i++) {
+        tcdm_write8(TCDM_ACT + i, test_vals[i]);
+        tcdm_write8(TCDM_WGT + i, 1);
+    }
+    CORE_ACT(0) = TCDM_ACT;
+    CORE_WGT(0) = TCDM_WGT;
+    CORE_OUT(0) = TCDM_OUT;
+    CORE_SLIDE(0) = 0;
+    CORE_CTRL(0) = ACT_SIGMOID | 0x05;
+    wait_core_idle(0);
+    return 0;
+}
+
+// ========== Test 16: SILU (Hardware LUT) ==========
+static int test_silu(void) {
+    signed char test_vals[4] = {0, 16, -16, 8};
+    for (int i = 0; i < 4; i++) {
+        tcdm_write8(TCDM_ACT + i, test_vals[i]);
+        tcdm_write8(TCDM_WGT + i, 1);
+    }
+    CORE_ACT(0) = TCDM_ACT;
+    CORE_WGT(0) = TCDM_WGT;
+    CORE_OUT(0) = TCDM_OUT;
+    CORE_SLIDE(0) = 0;
+    CORE_CTRL(0) = ACT_SILU | 0x05;
+    wait_core_idle(0);
+    return 0;
+}
+
+// ========== Test 17: MISH (Hardware LUT) ==========
+static int test_mish(void) {
+    signed char test_vals[4] = {0, 16, -16, 8};
+    for (int i = 0; i < 4; i++) {
+        tcdm_write8(TCDM_ACT + i, test_vals[i]);
+        tcdm_write8(TCDM_WGT + i, 1);
+    }
+    CORE_ACT(0) = TCDM_ACT;
+    CORE_WGT(0) = TCDM_WGT;
+    CORE_OUT(0) = TCDM_OUT;
+    CORE_SLIDE(0) = 0;
+    CORE_CTRL(0) = ACT_MISH | 0x05;
+    wait_core_idle(0);
+    return 0;
+}
+
+// ========== Test 18: RESIZE_NEAREST_NEIGHBOR ==========
+static int test_resize_nn(void) {
+    signed char in[4] = {1, 2, 3, 4};
+    for(int i=0; i<4; i++) tcdm_write8(TCDM_ACT + i, in[i]);
+    for (int oy=0; oy<4; oy++) {
+        for (int ox=0; ox<4; ox++) {
+            int iy = oy / 2;
+            int ix = ox / 2;
+            signed char val = tcdm_read8(TCDM_ACT + iy*2 + ix);
+            tcdm_write8(TCDM_OUT + oy*4 + ox, val);
+        }
+    }
+    int errors = 0;
+    if (tcdm_read8(TCDM_OUT + 0) != 1) errors++;
+    if (tcdm_read8(TCDM_OUT + 1) != 1) errors++;
+    if (tcdm_read8(TCDM_OUT + 5) != 1) errors++;
+    if (tcdm_read8(TCDM_OUT + 10) != 4) errors++;
+    if (tcdm_read8(TCDM_OUT + 15) != 4) errors++;
+    return errors;
+}
+
+// ========== Test 19: STRIDED_SLICE / SPLIT ==========
+static int test_strided_slice(void) {
+    for(int i=0; i<16; i++) tcdm_write8(TCDM_ACT + i, (signed char)i);
+    int out_idx = 0;
+    for(int y=1; y<3; y++) {
+        for(int x=1; x<3; x++) {
+            signed char val = tcdm_read8(TCDM_ACT + y*4 + x);
+            tcdm_write8(TCDM_OUT + out_idx++, val);
+        }
+    }
+    int errors = 0;
+    if (tcdm_read8(TCDM_OUT + 0) != 5) errors++;
+    if (tcdm_read8(TCDM_OUT + 1) != 6) errors++;
+    if (tcdm_read8(TCDM_OUT + 2) != 9) errors++;
+    if (tcdm_read8(TCDM_OUT + 3) != 10) errors++;
+    return errors;
+}
+
+// ========== Test 20: TRANSPOSE ==========
+static int test_transpose(void) {
+    signed char in[8] = {1,2,3,4, 5,6,7,8};
+    for(int i=0; i<8; i++) tcdm_write8(TCDM_ACT + i, in[i]);
+    for(int r=0; r<2; r++) {
+        for(int c=0; c<4; c++) {
+            signed char val = tcdm_read8(TCDM_ACT + r*4 + c);
+            tcdm_write8(TCDM_OUT + c*2 + r, val);
+        }
+    }
+    int errors = 0;
+    if (tcdm_read8(TCDM_OUT + 0) != 1) errors++;
+    if (tcdm_read8(TCDM_OUT + 1) != 5) errors++;
+    if (tcdm_read8(TCDM_OUT + 2) != 2) errors++;
+    if (tcdm_read8(TCDM_OUT + 3) != 6) errors++;
+    return errors;
+}
+
 // ========== Main Entry Point ==========
 int main(void) {
     // Wait for host trigger via WFI + mailbox
     __asm__ volatile ("wfi");
 
     int total_errors = 0;
-    int test_results[14];
+    int test_results[20];
 
     // Run all tests
     test_results[0]  = test_conv2d();
@@ -545,8 +653,16 @@ int main(void) {
     test_results[12] = test_reshape();
     test_results[13] = test_pad();
 
+    test_results[14] = test_sigmoid();
+    test_results[15] = test_silu();
+    test_results[16] = test_mish();
+    test_results[17] = test_resize_nn();
+    test_results[18] = test_strided_slice();
+    test_results[19] = test_transpose();
+
+
     // Sum errors
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 20; i++) {
         total_errors += test_results[i];
     }
 

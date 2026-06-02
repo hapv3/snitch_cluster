@@ -24,8 +24,10 @@ package npu_compute_core_pkg;
     ACT_NONE       = 3'b000,
     ACT_RELU       = 3'b001,
     ACT_RELU6      = 3'b010,
-    ACT_SIGMOID    = 3'b011, // LUT-based
-    ACT_LEAKY_RELU = 3'b100  // alpha ≈ 0.125 (>>3)
+    ACT_SIGMOID    = 3'b011, // Hardware LUT
+    ACT_LEAKY_RELU = 3'b100, // alpha ≈ 0.125 (>>3)
+    ACT_SILU       = 3'b101, // Hardware LUT
+    ACT_MISH       = 3'b110  // Hardware LUT
   } act_type_e;
 
   /// Configuration structure for a compute core
