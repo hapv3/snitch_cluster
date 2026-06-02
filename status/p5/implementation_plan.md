@@ -131,3 +131,37 @@ These operators are mapped to the hardware via firmware control logic or execute
 
 ### Manual Verification
 - Review waveform (VCD) for each operator to confirm correct DMA timing and MAC pipeline behavior.
+
+## Phase 5.5: YOLO Model Support & Operators Expansion
+
+To fully support the YOLO family (particularly YOLOv5, YOLOv7, YOLOv8) for object detection, the architecture and firmware must be expanded beyond standard CNNs (MobileNet/ResNet). YOLO models introduce specific activation functions and spatial transformation operators.
+
+### New Operators Required for YOLO
+
+1.  **SiLU (Swish) Activation**: $f(x) = x \cdot \text{sigmoid}(x)$. Used extensively in YOLOv5/v8 in place of ReLU.
+2.  **Mish Activation**: Used in YOLOv4.
+3.  **UpSampling (Resize Nearest Neighbor)**: Critical for the Feature Pyramid Network (FPN) and PANet in YOLO's neck to combine features at different scales.
+4.  **Strided Slice / Split**: Used for tensor manipulation and Focus layers.
+5.  **Transpose / Permute**: Necessary for reshaping tensors before the bounding box decoding (Detect layer).
+6.  **Sigmoid**: Used for output confidence scores.
+
+### Proposed Changes
+
+#### 1. Hardware Activation Engine Update
+- **[MODIFY]** `hw/npu_compute_core/src/npu_activation_engine.sv`
+  - Add `ACT_SILU` and `ACT_SIGMOID` to the activation enum.
+  - Implement a shared 256-entry Lookup Table (LUT) in hardware to evaluate the complex non-linear functions (SiLU, Sigmoid, Mish) in a single cycle. (Since SiLU is $x / (1 + e^{-x})$, a hardware LUT is the only way to meet the 1 GHz timing constraint without huge multipliers).
+
+#### 2. Firmware C Codebase Expansion
+- **[MODIFY]** `hw/npu_cluster/tb/fw/tensorlite_ops.c` & `hw/npu_cluster/tb/fw/tensorlite_ops.h`
+  - Implement `RESIZE_NEAREST_NEIGHBOR`: Use the 2D striding DMA engine to replicate pixels spatially without tying up the Compute Cores.
+  - Implement `TRANSPOSE`: Create a nested `Xfrep` loop in firmware that utilizes the DMA engine's striding capabilities to transpose matrices in the TCDM.
+  - Implement `STRIDED_SLICE` / `SPLIT`: Pure pointer arithmetic and DMA configuration to slice tensors.
+
+#### 3. C++ Testbench Update
+- **[MODIFY]** `hw/npu_cluster/tb/tensorlite_test.cpp`
+  - Add unit tests for `SiLU`, `ResizeNearestNeighbor`, and `Transpose` to the Phase 5 testbench.
+
+### User Review Required
+> [!IMPORTANT]  
+> Hardware LUT for SiLU and Sigmoid will consume some SRAM/Logic area (256 entries x 8-bit). Do you approve the addition of a hardware LUT in the Activation Engine, or would you prefer evaluating SiLU in software (RISC-V firmware) at the cost of significantly lower performance?
