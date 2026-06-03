@@ -7,10 +7,12 @@
 /// receiving tasks from the ARM host via the Mailbox, programming the DMA to move data,
 /// and dispatching execution commands to the MAC arrays.
 
+`include "snitch/typedef.svh"
+import snitch_pkg::*;
+
 module npu_control_core #(
   parameter int unsigned AddrWidth = 32,
   parameter int unsigned DataWidth = 32
-  // parameter snitch_pkg::isa_cfg_t IsaCfg = '0 // Placeholder for actual IsaCfg
 ) (
   input  logic clk_i,
   input  logic rst_ni,
@@ -49,17 +51,14 @@ module npu_control_core #(
   output logic                 fw_req_ready_o,
   output logic                 fw_rsp_valid_o,
   output logic [DataWidth-1:0] fw_rsp_data_o,
-  input  logic                 fw_rsp_ready_i,
-
-  // Core Data Port (Driven by Testbench ISS)
-  input  logic                 core_req_valid_i,
-  input  logic                 core_req_write_i,
-  input  logic [AddrWidth-1:0] core_req_addr_i,
-  input  logic [DataWidth-1:0] core_req_data_i,
-  output logic                 core_req_ready_o,
-  output logic                 core_rsp_valid_o,
-  output logic [DataWidth-1:0] core_rsp_data_o
+  input  logic                 fw_rsp_ready_i
 );
+
+  typedef `SNITCH_INSTR_REQ_STRUCT(AddrWidth) ireq_t;
+  typedef `SNITCH_INSTR_RSP_STRUCT irsp_t;
+  typedef `SNITCH_DATA_REQ_STRUCT(DataWidth, AddrWidth) dreq_t;
+  typedef `SNITCH_DATA_RSP_STRUCT(DataWidth) drsp_t;
+
 
   // Define instruction memory interface (I-SPM)
   logic                 ispm_req_valid;
@@ -124,9 +123,9 @@ module npu_control_core #(
     .core_req_addr_i    (mbox_req_addr),
     .core_req_data_i    (mbox_req_data),
     .core_req_ready_o   (mbox_req_ready),
-    .core_rsp_valid_o   (mbox_rsp_valid),
-    .core_rsp_data_o    (mbox_rsp_data),
-    .core_rsp_ready_i   (1'b1), // Core always ready for MMIO response
+    .core_rsp_valid_o (mbox_rsp_valid),
+    .core_rsp_data_o  (mbox_rsp_data),
+    .core_rsp_ready_i (1'b1), // Core always ready for MMIO response
     // IRQs
     .irq_to_core_o      (irq_from_mbox),
     .irq_to_host_o      (irq_to_host_o)
@@ -141,14 +140,29 @@ module npu_control_core #(
   logic                 core_data_rsp_valid;
   logic [DataWidth-1:0] core_data_rdata;
 
-  // Map from testbench to internal core_data
-  assign core_data_valid = core_req_valid_i;
-  assign core_data_write = core_req_write_i;
-  assign core_data_addr  = core_req_addr_i;
-  assign core_data_wdata = core_req_data_i;
-  assign core_req_ready_o = core_data_ready;
-  assign core_rsp_valid_o = core_data_rsp_valid;
-  assign core_rsp_data_o  = core_data_rdata;
+  ireq_t inst_req;
+  irsp_t inst_rsp;
+  dreq_t data_req;
+  drsp_t data_rsp;
+
+  assign ispm_req_valid = inst_req.q_valid;
+  assign ispm_req_addr  = inst_req.addr;
+  assign inst_rsp.q_ready = ispm_req_ready;
+  
+  assign inst_rsp.data  = ispm_rsp_data;
+  assign inst_rsp.error = 1'b0;
+
+  assign core_data_valid = data_req.q_valid;
+  assign core_data_write = data_req.q.write;
+  assign core_data_addr  = data_req.q.addr;
+  assign core_data_wdata = data_req.q.data;
+  
+  
+  assign data_rsp.p_valid = core_data_rsp_valid;
+  assign data_rsp.p.data  = core_data_rdata;
+  assign data_rsp.p.error = 1'b0;
+  assign data_rsp.q_ready = core_data_ready;
+
 
   always_comb begin
     // Default assignments
@@ -177,29 +191,117 @@ module npu_control_core #(
       end
     end
     
+    // Handled by response buffer
+  end
+
+  // Raw responses from MBOX or TCDM
+  logic raw_rsp_valid;
+  logic [DataWidth-1:0] raw_rsp_data;
+
+  always_comb begin
+    raw_rsp_valid = 1'b0;
+    raw_rsp_data = '0;
     if (mbox_rsp_valid) begin
-      core_data_rsp_valid = 1'b1;
-      core_data_rdata = mbox_rsp_data;
+      raw_rsp_valid = 1'b1;
+      raw_rsp_data = mbox_rsp_data;
     end else if (tcdm_rsp_valid_i) begin
-      core_data_rsp_valid = 1'b1;
-      core_data_rdata = tcdm_rsp_data_i;
+      raw_rsp_valid = 1'b1;
+      raw_rsp_data = tcdm_rsp_data_i;
     end
   end
 
-  // Interrupt mapping
-  logic [2:0] irq; // {mti, msi, mei}
-  assign irq = {1'b0, 1'b0, irq_from_mbox}; // Map Mailbox interrupt to Machine External Interrupt
+  // Buffer response to handle core's p_ready backpressure
+  logic buffered_rsp_valid_q;
+  logic [DataWidth-1:0] buffered_rsp_data_q;
+  
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      buffered_rsp_valid_q <= 1'b0;
+      buffered_rsp_data_q <= '0;
+    end else begin
+      if (raw_rsp_valid && !data_req.p_ready) begin
+        // Buffer the response
+        buffered_rsp_valid_q <= 1'b1;
+        buffered_rsp_data_q <= raw_rsp_data;
+      end else if (buffered_rsp_valid_q && data_req.p_ready) begin
+        // Response accepted by core
+        buffered_rsp_valid_q <= 1'b0;
+      end
+    end
+  end
 
-  // Snitch RISC-V Core Instantiation
-  // (Simplified placeholder binding for the Snitch generic core)
-  // The actual snitch_cc uses complex struct interfaces, here we abstract
-  // the signals to flattened req/rsp for simplicity in the NPU wrapper.
+  assign core_data_rsp_valid = buffered_rsp_valid_q ? 1'b1 : raw_rsp_valid;
+  assign core_data_rdata     = buffered_rsp_valid_q ? buffered_rsp_data_q : raw_rsp_data;
   
-  // To instantiate the true Snitch, we would map core_data_* to the dreq_t struct
-  // and ispm_req_* to the hive_req_t struct.
-  
-  // ... Snitch wrapper logic goes here ...
-  // For the sake of the smoke test, we simulate the core fetching instructions from I-SPM
-  // and executing dummy operations or waiting for the mailbox.
+  // Dummy block to continue logic
+
+  // Interrupt mapping
+  snitch_pkg::interrupts_t irq;
+  always_comb begin
+    irq = '0;
+    irq.meip = irq_from_mbox; // Map Mailbox interrupt to Machine External Interrupt
+  end
+  snitch #(
+    .BootAddr (32'h0000_1000),
+    .AddrWidth (AddrWidth),
+    .DataWidth (DataWidth),
+    .NumIntOutstandingMem (1),
+    .NumIntOutstandingLoads (1),
+    .VMSupport (0),
+    .EnableXif (0)
+  ) i_core (
+    .clk_i,
+    .rst_i           (~rst_ni),
+    .hart_id_i,
+    .irq_i           (irq),
+    .flush_i_valid_o (),
+    .flush_i_ready_i (1'b1),
+    .inst_req_o      (inst_req),
+    .inst_rsp_i      (inst_rsp),
+    .acc_req_o       (),
+    .acc_rsp_i       ('0),
+    .x_issue_req_o      (),
+    .x_issue_resp_i     ('0),
+    .x_issue_valid_o    (),
+    .x_issue_ready_i    (1'b0),
+    .x_register_o       (),
+    .x_register_valid_o (),
+    .x_register_ready_i (1'b0),
+    .x_commit_o         (),
+    .x_commit_valid_o   (),
+    .x_result_i         ('0),
+    .x_result_valid_i   (1'b0),
+    .x_result_ready_o   (),
+    .data_req_o      (data_req),
+    .data_rsp_i      (data_rsp),
+    .ptw_req_o       (),
+    .ptw_rsp_i       ('0),
+    .fpu_fmt_mode_o  (),
+    .fpu_rnd_mode_o  (),
+    .caq_pvalid_i    (1'b0),
+    .core_events_o   (),
+    .en_copift_o     (),
+    .barrier_o       (),
+    .barrier_i       (1'b0)
+  );
+
+  // Fetch Print
+  always_ff @(posedge clk_i) begin
+    if (rst_ni) begin
+      // $display("[%0t] [PC_TRACE] PC: %x", $time, i_core.pc_q);
+      
+      if (ispm_req_valid) begin
+        // $display("[%0t] [FETCH] Addr: %x", $time, ispm_req_addr); 
+      end
+      if (core_data_valid && core_data_ready) begin
+        $display("[%0t] [LSU_REQ] write=%b addr=%x wdata=%x", $time, core_data_write, core_data_addr, core_data_wdata);
+      end else if (core_data_valid && !core_data_ready) begin
+        $display("[%0t] [LSU_STALL] addr=%x mbox_req_ready=%b", $time, core_data_addr, mbox_req_ready);
+      end
+      if (core_data_rsp_valid) begin
+        $display("[%0t] [LSU_RSP] rdata=%x", $time, core_data_rdata);
+      end
+    end
+  end
 
 endmodule

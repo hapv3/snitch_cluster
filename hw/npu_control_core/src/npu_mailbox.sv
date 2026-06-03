@@ -68,10 +68,14 @@ module npu_mailbox #(
         host_rsp_valid_o <= 1'b1;
         
         if (host_req_write_i) begin
+          $display("[%0t] [MBOX] HOST WRITE Addr: %x Data: %x (reg_idx=%0d)", $time, host_req_addr_i, host_req_data_i, reg_idx);
           if (reg_idx >= 2 && reg_idx < 16) begin
             registers[reg_idx] <= host_req_data_i;
           end else if (reg_idx == 1) begin // CONTROL
-            if (host_req_data_i[0]) task_pending_q <= 1'b1; // Trigger task
+            if (host_req_data_i[0]) begin
+              task_pending_q <= 1'b1; // Trigger task
+              $display("[%0t] [MBOX] task_pending_q set to 1!", $time);
+            end
           end
         end else begin
           if (reg_idx == 0) begin

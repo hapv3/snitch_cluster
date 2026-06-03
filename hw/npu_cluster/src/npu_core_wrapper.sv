@@ -29,7 +29,11 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
   output logic [TcdmDataWidth-1:0]tcdm_req_wdata_o,
   input  logic                    tcdm_req_ready_i,
   input  logic                    tcdm_rsp_valid_i,
-  input  logic [TcdmDataWidth-1:0]tcdm_rsp_rdata_i
+  input  logic [TcdmDataWidth-1:0]tcdm_rsp_rdata_i,
+  
+  // Interrupts
+  output logic                    irq_o,
+  input  logic                    irq_clear_i
 );
 
   // MMIO Registers
@@ -295,6 +299,24 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
         mac_active_cycles <= mac_active_cycles + 1;
       end
     end
+  end
+
+  // Interrupt logic
+  logic irq_q, irq_d;
+  assign irq_o = irq_q;
+
+  always_comb begin
+    irq_d = irq_q;
+    if (irq_clear_i) begin
+      irq_d = 1'b0;
+    end else if (state_q != IDLE && state_d == IDLE) begin
+      irq_d = 1'b1;
+    end
+  end
+
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) irq_q <= 1'b0;
+    else irq_q <= irq_d;
   end
 
 endmodule

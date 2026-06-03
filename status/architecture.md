@@ -39,6 +39,7 @@ Each **NPU Cluster** is an independent, self-contained AI computing node. It fea
 - **Control Core**: A 32-bit RISC-V integer core (RV32I) responsible for parsing the neural network graph, orchestrating data movement, and triggering computations.
 - **ISPM (Instruction Scratchpad Memory)**: 32KB memory storing the RISC-V firmware (`tensorlite_ops.bin`).
 - **Mailbox**: A synchronization primitive between the Host CPU and the RISC-V core.
+- **Firmware Load Port**: A direct memory injection interface (custom valid/ready) allowing the Testbench or Host DMA to preload firmware directly into I-SPM without AXI overhead.
 - **Memory Subsystem**: Features a Tightly Coupled Data Memory (TCDM) and a DMA Engine.
 - **10 Compute Cores**: Dedicated hardware blocks for matrix-multiplication and non-linear activations.
 
@@ -51,10 +52,12 @@ flowchart LR
         
         DMA <-->|Read/Write| TCDM[TCDM 64KB Shared Memory]
         CC <-->|Read Act/Wgt, Write Out| TCDM
+        FW_Port[Firmware Load Port] -->|Direct Inject| RV
     end
     
     DMA <-->|AXI4| External_Mem[External DDR]
     MB <-->|AXI-Lite| Host[Host CPU]
+    FW_Port <-->|Valid/Ready| TB[Testbench / Host DMA]
 ```
 
 ## 3. Memory Subsystem Architecture

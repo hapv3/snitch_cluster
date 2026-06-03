@@ -94,6 +94,7 @@ module npu_dma_engine #(
       reg_stride_dst <= '0;
       reg_trigger <= 1'b0;
     end else begin
+      if (state_q == TCDM_W || state_d == TCDM_W) $display("[%0t] [DMA_DEBUG] state=%d fifo=%b vld_o=%b rdy_i=%b addr=%x", $time, state_q, fifo_valid, tcdm_req_valid_o, tcdm_req_ready_i, tcdm_req_addr_o);
       reg_trigger <= 1'b0; // Auto-clear trigger
       
       if (ctrl_rsp_valid_o) begin
@@ -110,9 +111,13 @@ module npu_dma_engine #(
             4'h3: reg_dim_y <= ctrl_req_data_i;
             4'h4: reg_stride_src <= ctrl_req_data_i;
             4'h5: reg_stride_dst <= ctrl_req_data_i;
-            4'h6: reg_trigger <= ctrl_req_data_i[0];
+            4'h6: begin 
+                begin reg_trigger <= ctrl_req_data_i[0]; $display("[%0t] [DMA_TRIGGER] src=%x dst=%x dim_x=%d", $time, reg_src_addr, reg_dst_addr, reg_dim_x); end
+                $display("[%0t] [DMA_REG] TRIGGER Written! data=%b", $time, ctrl_req_data_i[0]);
+            end
           endcase
         end else begin
+      if (state_q == TCDM_W || state_d == TCDM_W) $display("[%0t] [DMA_DEBUG] state=%d fifo=%b vld_o=%b rdy_i=%b addr=%x", $time, state_q, fifo_valid, tcdm_req_valid_o, tcdm_req_ready_i, tcdm_req_addr_o);
           case (ctrl_req_addr_i[5:2])
             4'h0: ctrl_rsp_data_o <= reg_src_addr;
             4'h1: ctrl_rsp_data_o <= reg_dst_addr;
@@ -120,7 +125,10 @@ module npu_dma_engine #(
             4'h3: ctrl_rsp_data_o <= reg_dim_y;
             4'h4: ctrl_rsp_data_o <= reg_stride_src;
             4'h5: ctrl_rsp_data_o <= reg_stride_dst;
-            4'h7: ctrl_rsp_data_o <= {31'd0, busy_q};
+            4'h7: begin
+                ctrl_rsp_data_o <= {31'd0, busy_q};
+                $display("[%0t] [DMA_REG] Read STATUS: busy_q=%b state_q=%d", $time, busy_q, state_q);
+            end
             4'h8: ctrl_rsp_data_o <= dma_read_count;
             4'h9: ctrl_rsp_data_o <= dma_write_count;
             default: ctrl_rsp_data_o <= '0;
@@ -170,6 +178,7 @@ module npu_dma_engine #(
       dma_read_count <= '0;
       dma_write_count <= '0;
     end else begin
+      if (state_q == TCDM_W || state_d == TCDM_W) $display("[%0t] [DMA_DEBUG] state=%d fifo=%b vld_o=%b rdy_i=%b addr=%x", $time, state_q, fifo_valid, tcdm_req_valid_o, tcdm_req_ready_i, tcdm_req_addr_o);
       state_q <= state_d;
       curr_src_q <= curr_src_d;
       curr_dst_q <= curr_dst_d;
@@ -238,6 +247,7 @@ module npu_dma_engine #(
             state_d = AXI_R;
           end
         end else begin
+      if (state_q == TCDM_W || state_d == TCDM_W) $display("[%0t] [DMA_DEBUG] state=%d fifo=%b vld_o=%b rdy_i=%b addr=%x", $time, state_q, fifo_valid, tcdm_req_valid_o, tcdm_req_ready_i, tcdm_req_addr_o);
           state_d = NEXT_LINE;
         end
       end
@@ -275,6 +285,7 @@ module npu_dma_engine #(
           curr_dst_d = curr_dst_q - reg_dim_x + reg_stride_dst;
           state_d = AXI_AR;
         end else begin
+      if (state_q == TCDM_W || state_d == TCDM_W) $display("[%0t] [DMA_DEBUG] state=%d fifo=%b vld_o=%b rdy_i=%b addr=%x", $time, state_q, fifo_valid, tcdm_req_valid_o, tcdm_req_ready_i, tcdm_req_addr_o);
           state_d = DONE;
         end
       end

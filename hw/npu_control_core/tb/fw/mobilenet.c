@@ -35,6 +35,10 @@ int main() {
     int cluster_id;
     __asm__ volatile ("mv %0, a0" : "=r"(cluster_id));
 
+    // Enable Machine External Interrupts (MEIE) so WFI can wake up
+    __asm__ volatile ("li t0, 0x800");
+    __asm__ volatile ("csrs mie, t0");
+
     *NPU_CLUSTER_MASK = 0x000003FF; // Enable all cores
 
     while (1) {
@@ -91,10 +95,10 @@ int main() {
             *NPU_CORE_STRIDE_SLIDE(3) = (3 << 8) | 1;
             *NPU_CORE_CTRL(3) = 0x1 | (is_first ? 0x2 : 0) | (is_last ? 0x4 : 0);
 
-            while ((*NPU_CORE_STATUS(0) & 0x1) != 0);
-            while ((*NPU_CORE_STATUS(1) & 0x1) != 0);
-            while ((*NPU_CORE_STATUS(2) & 0x1) != 0);
-            while ((*NPU_CORE_STATUS(3) & 0x1) != 0);
+            while ((*NPU_CORE_STATUS(0)) != 0);
+            while ((*NPU_CORE_STATUS(1)) != 0);
+            while ((*NPU_CORE_STATUS(2)) != 0);
+            while ((*NPU_CORE_STATUS(3)) != 0);
         }
 
         // Notify Host that this cluster finished

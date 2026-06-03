@@ -101,15 +101,15 @@ module npu_tcdm_interconnect #(
       rsp_valid_q <= '0;
       rsp_target_q <= '0;
     end else begin
-      for (int b = 0; b < NumBanks; b++) begin
-        // Only expect a response for READs
-        if (bank_req_o[b] && !bank_write_o[b]) begin
-          rsp_valid_q[b]  <= 1'b1;
-          rsp_target_q[b] <= grant_idx[b];
-        end else begin
-          rsp_valid_q[b]  <= 1'b0;
+        for (int b = 0; b < NumBanks; b++) begin
+          // Expect a response for both READs and WRITEs to pop the master's request queue
+          if (bank_req_o[b]) begin
+            rsp_valid_q[b]  <= 1'b1;
+            rsp_target_q[b] <= grant_idx[b];
+          end else begin
+            rsp_valid_q[b]  <= 1'b0;
+          end
         end
-      end
     end
   end
 

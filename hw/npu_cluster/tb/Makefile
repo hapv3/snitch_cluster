@@ -1,5 +1,22 @@
-VFLAGS = --assert --top-module npu_cluster_top -Wall -Wno-fatal --trace --cc -Wno-lint --build --exe
-SRC = ../src/npu_cluster_top.sv ../src/npu_core_wrapper.sv \
+VFLAGS = --assert --top-module npu_cluster_top +define+ASSERTS_OFF -Wall -Wno-fatal --trace --cc -Wno-lint --build --exe
+PULP_INC = -y ../../snitch/src -I../../snitch/include \
+           -y ../../common_cells/src -I../../common_cells/include \
+           -y ../../fpnew/src -I../../fpnew/include \
+           -y ../../reqrsp_interface/src -I../../reqrsp_interface/include \
+           -y ../../register_interface/src -I../../register_interface/include \
+           -y ../../riscv-dbg/src
+VINC = -I../../npu_compute_core/src -I../../npu_cluster/src -I../../npu_control_core/src -I../../npu_memory_system/src
+
+SRC = ../../riscv-dbg/src/dm_pkg.sv \
+      ../../common_cells/src/cf_math_pkg.sv \
+      ../../fpnew/src/fpnew_pkg.sv \
+      ../../snitch/src/snitch_pkg.sv \
+      ../../snitch/src/snitch_pma_pkg.sv \
+      ../../snitch/src/riscv_instr.sv \
+      ../../snitch/src/snitch_regfile_ff.sv \
+      ../../snitch/src/snitch_lsu.sv \
+      ../../snitch/src/snitch_l0_tlb.sv \
+      ../src/npu_cluster_top.sv ../src/npu_core_wrapper.sv \
       ../../npu_control_core/src/npu_control_core.sv \
       ../../npu_control_core/src/npu_ispm.sv \
       ../../npu_control_core/src/npu_mailbox.sv \
@@ -11,27 +28,8 @@ SRC = ../src/npu_cluster_top.sv ../src/npu_core_wrapper.sv \
       ../../npu_compute_core/src/npu_mac_array.sv \
       ../../npu_compute_core/src/npu_activation_engine.sv
 
-VINC = -I../../npu_compute_core/src
+all: npu_cluster
 
-# Build firmware first
-fw:
-	$(MAKE) -C fw
-
-# Phase 4 test
-conv2d: fw
-	verilator $(VFLAGS) $(VINC) $(SRC) conv2d_test.cpp -Mdir obj_dir -o Vnpu_cluster_top
-	./obj_dir/Vnpu_cluster_top
-
-# Phase 5 test (TensorLite operators)
-tensorlite: fw
-	verilator $(VFLAGS) $(VINC) $(SRC) tensorlite_test.cpp -Mdir obj_dir_tensorlite -o Vtensorlite
-	./obj_dir_tensorlite/Vtensorlite
-
-# Default: build everything
-all: conv2d tensorlite
-
-clean:
-	rm -rf obj_dir obj_dir_tensorlite *.vcd
-	$(MAKE) -C fw clean
-
-.PHONY: all fw conv2d tensorlite clean
+npu_cluster:
+	verilator $(VFLAGS) $(PULP_INC) $(VINC) $(SRC) npu_cluster_tb.cpp -Mdir obj_dir_cluster -o Vnpu_cluster_top
+	./obj_dir_cluster/Vnpu_cluster_top

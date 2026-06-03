@@ -52,25 +52,21 @@ module npu_ispm #(
     boot_rom[1] = 32'hbfdff06f; // j -4 (loop back to wfi)
   end
 
-  // Instruction Fetch Port (Read-Only)
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      fetch_rsp_valid_o <= 1'b0;
-      fetch_rsp_data_o <= '0;
-    end else begin
-      fetch_req_ready_o <= 1'b1; // Always ready
-      if (fetch_req_valid_i && fetch_req_ready_o) begin
-        fetch_rsp_valid_o <= 1'b1;
-        if (fetch_req_addr_i < RomSize) begin
-          fetch_rsp_data_o <= boot_rom[fetch_req_addr_i[$clog2(RomWords)+1:2]];
-        end else if (fetch_req_addr_i >= 32'h1000 && fetch_req_addr_i < 32'h1000 + IspmSize) begin
-          fetch_rsp_data_o <= ispm_ram[(fetch_req_addr_i - 32'h1000) >> 2];
-        end else begin
-          fetch_rsp_data_o <= 32'h00000000; // Error / trap instruction
-        end
+  // Instruction Fetch Port (Read-Only) - Combinational for Snitch
+  assign fetch_req_ready_o = 1'b1; // Always ready
+  assign fetch_rsp_valid_o = fetch_req_valid_i;
+  
+  always_comb begin
+    if (fetch_req_valid_i) begin
+      if (fetch_req_addr_i < RomSize) begin
+        fetch_rsp_data_o = boot_rom[fetch_req_addr_i[$clog2(RomWords)+1:2]];
+      end else if (fetch_req_addr_i >= 32'h1000 && fetch_req_addr_i < 32'h1000 + IspmSize) begin
+        fetch_rsp_data_o = ispm_ram[(fetch_req_addr_i - 32'h1000) >> 2];
       end else begin
-        fetch_rsp_valid_o <= 1'b0;
+        fetch_rsp_data_o = 32'h00000000; // Error / trap instruction
       end
+    end else begin
+      fetch_rsp_data_o = '0;
     end
   end
 
@@ -91,7 +87,7 @@ module npu_ispm #(
         if (load_req_addr_i >= 32'h1000 && load_req_addr_i < 32'h1000 + IspmSize) begin
           automatic logic [$clog2(IspmWords)-1:0] idx = (load_req_addr_i - 32'h1000) >> 2;
           if (load_req_write_i) begin
-            ispm_ram[idx] <= load_req_data_i;
+            ispm_ram[idx] <= load_req_data_i; $display("[ISPM] Wrote %x to %x (idx %d)", load_req_data_i, load_req_addr_i, idx);
             load_rsp_data_o <= '0;
           end else begin
             load_rsp_data_o <= ispm_ram[idx];

@@ -4,8 +4,8 @@
 .section .text.init
 .globl _start
 _start:
-    /* Initialize stack pointer to end of I-SPM (32KB limit mapped at 0x1000) */
-    li sp, 0x1000 + 32768
+    /* Initialize stack pointer to end of TCDM (256KB mapped at 0x10000000) */
+    li sp, 0x10040000
     
     /* Call main */
     call main

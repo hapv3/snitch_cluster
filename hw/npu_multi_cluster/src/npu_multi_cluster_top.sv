@@ -43,17 +43,7 @@ module npu_multi_cluster_top #(
   input  logic [NumClusters-1:0]                 fw_req_write_i,
   input  logic [NumClusters-1:0][AddrWidth-1:0]  fw_req_addr_i,
   input  logic [NumClusters-1:0][DataWidth-1:0]  fw_req_data_i,
-  output logic [NumClusters-1:0]                 fw_req_ready_o,
-
-  // Core Data Ports
-  input  logic [NumClusters-1:0]                 core_req_valid_i,
-  input  logic [NumClusters-1:0]                 core_req_write_i,
-  input  logic [NumClusters-1:0][AddrWidth-1:0]  core_req_addr_i,
-  input  logic [NumClusters-1:0][DataWidth-1:0]  core_req_data_i,
-  output logic [NumClusters-1:0]                 core_req_ready_o,
-  
-  output logic [NumClusters-1:0]                 core_rsp_valid_o,
-  output logic [NumClusters-1:0][DataWidth-1:0]  core_rsp_data_o
+  output logic [NumClusters-1:0]                 fw_req_ready_o
 );
 
   // AXI Multiplexer / Interconnect Stub
@@ -153,14 +143,7 @@ module npu_multi_cluster_top #(
       .fw_req_write_i(fw_req_write_i[i]),
       .fw_req_addr_i(fw_req_addr_i[i]),
       .fw_req_data_i(fw_req_data_i[i]),
-      .fw_req_ready_o(fw_req_ready_o[i]),
-      .core_req_valid_i(core_req_valid_i[i]),
-      .core_req_write_i(core_req_write_i[i]),
-      .core_req_addr_i(core_req_addr_i[i]),
-      .core_req_data_i(core_req_data_i[i]),
-      .core_req_ready_o(core_req_ready_o[i]),
-      .core_rsp_valid_o(core_rsp_valid_o[i]),
-      .core_rsp_data_o(core_rsp_data_o[i])
+      .fw_req_ready_o(fw_req_ready_o[i])
     );
   end
 

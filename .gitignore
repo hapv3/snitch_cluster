@@ -10,3 +10,5 @@ work_verilator/
 *.d
 *.log
 *.vcd
+tools/
+smoke_out*
