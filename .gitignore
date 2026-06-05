@@ -12,3 +12,11 @@ work_verilator/
 *.vcd
 tools/
 smoke_out*
+hw/axi/
+hw/common_cells/
+hw/cva6/
+hw/fpnew/
+hw/iDMA/
+hw/register_interface/
+hw/riscv-dbg/
+scratch/
