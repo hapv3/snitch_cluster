@@ -4,10 +4,14 @@
 #ifndef NPU_MMIO_H
 #define NPU_MMIO_H
 
+#ifndef __cplusplus
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned int uintptr_t;
+#else
+#include <cstdint>
+#endif
 
 // ==========================================
 // 1. Memory Map (Host Perspective)
@@ -39,6 +43,9 @@ typedef enum {
     OP_COMPUTE_ACT_SILU  = 0x31, // Trigger SiLU Activation
     OP_COMPUTE_ACT_MISH  = 0x32, // Trigger Mish Activation
     OP_COMPUTE_ACT_SIGMOID = 0x33, // Trigger Sigmoid Activation
+    OP_CFG_MATMUL        = 0x34, // Configure MatMul sizes (M, K, N)
+    OP_COMPUTE_MATMUL    = 0x35, // Trigger tiled MatMul
+    OP_COMPUTE_MATMUL_LARGE = 0x36, // Trigger Outer-Tiled Large MatMul
     
     // Firmware Fallback Operations (Executed by RISC-V Firmware)
     OP_FW_MAXPOOL    = 0x40,

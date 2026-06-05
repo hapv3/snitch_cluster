@@ -6,7 +6,8 @@ ENTRY(_start)
 
 MEMORY
 {
-  ispm (rwx) : ORIGIN = 0x1000, LENGTH = 32K
+  ispm (rwx) : ORIGIN = 0x1000,       LENGTH = 32K
+  tcdm (rw)  : ORIGIN = 0x10030000,   LENGTH = 64K
 }
 
 SECTIONS
@@ -14,18 +15,16 @@ SECTIONS
   .text : {
     *(.text.init)
     *(.text*)
-  } > ispm
-
-  .data : {
-    *(.data*)
     *(.rodata*)
-    *(.sdata*)
   } > ispm
 
+  /* .bss runs in TCDM, zero-initialized by start.S */
   .bss : {
+    _bss_start = .;
     *(.bss*)
     *(.sbss*)
-  } > ispm
+    _bss_end = .;
+  } > tcdm
 
   _end = .;
 }

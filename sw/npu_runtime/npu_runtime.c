@@ -26,9 +26,14 @@
 #define CORE_CTRL(c)    (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x00))
 #define CORE_ACT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x04))
 #define CORE_WGT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x08))
-#define CORE_OUT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x0C))
+#define CORE_OUT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x0c))
 #define CORE_STATUS(c)  (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x10))
 #define CORE_SLIDE(c)   (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x14))
+
+// Global variables for MatMul configuration (uninitialized -> .bss, zero by start.S)
+uint32_t matmul_M;
+uint32_t matmul_K;
+uint32_t matmul_N;
 
 // Utility Functions
 static void wait_core_idle(int core) {
@@ -42,28 +47,39 @@ static void wait_dma_idle(void) {
 // Global state
 static volatile npu_cmd_queue_t* cmd_queue = 0; // Host must pass this pointer via arg or known addr
 
+static uint32_t soft_mul(uint32_t a, uint32_t b) {
+    uint32_t res = 0;
+    while (b > 0) {
+        if (b & 1) res += a;
+        a <<= 1;
+        b >>= 1;
+    }
+    return res;
+}
+
 void execute_op(const npu_cmd_t* cmd) {
     switch (cmd->opcode) {
         case OP_NOP:
             break;
             
-        case OP_DMA_READ:
-        case OP_DMA_WRITE:
+        case OP_DMA_READ: {
             wait_dma_idle();
-            if (cmd->opcode == OP_DMA_READ) {
-                DMA_SRC = cmd->args.dma.ext_addr;
-                DMA_DST = cmd->args.dma.tcdm_addr;
-            } else {
-                DMA_SRC = cmd->args.dma.tcdm_addr;
-                DMA_DST = cmd->args.dma.ext_addr;
-            }
-            // For now, treat size as simple 1D transfer
+            DMA_SRC = cmd->args.dma.ext_addr;
+            DMA_DST = cmd->args.dma.tcdm_addr;
             DMA_DIM_X = cmd->args.dma.size;
-            DMA_DIM_Y = 1;
-            DMA_STRIDE_S = 0;
-            DMA_STRIDE_D = 0;
-            DMA_TRIGGER = 1; // Start DMA
+            DMA_TRIGGER = 1;
+            wait_dma_idle();
             break;
+        }
+        case OP_DMA_WRITE: {
+            wait_dma_idle();
+            DMA_SRC = cmd->args.dma.tcdm_addr;
+            DMA_DST = cmd->args.dma.ext_addr;
+            DMA_DIM_X = cmd->args.dma.size;
+            DMA_TRIGGER = 1;
+            wait_dma_idle();
+            break;
+        }
             
         case OP_WAIT_DMA:
             wait_dma_idle();
@@ -95,6 +111,53 @@ void execute_op(const npu_cmd_t* cmd) {
             // TODO: Call maxpool firmware loop
             break;
             
+        case OP_CFG_MATMUL: { // 0x34
+            matmul_M = cmd->args.fw_op.arg0;
+            matmul_K = cmd->args.fw_op.arg1;
+            matmul_N = cmd->args.fw_op.arg2;
+            break;
+        }
+            
+        case OP_COMPUTE_MATMUL: { // 0x35
+            uint32_t act_base = cmd->args.compute.act_addr;
+            uint32_t wgt_base = cmd->args.compute.wgt_addr;
+            uint32_t out_base = cmd->args.compute.out_addr;
+            
+            uint32_t TILE_M = 1;
+            uint32_t TILE_K = 32;
+            uint32_t TILE_N = 4;
+            
+            // hardware requires K to be padded to multiple of 32
+            uint32_t k_pad = ((matmul_K + 31) >> 5) << 5;
+            uint32_t n_pad = ((matmul_N + 3) >> 2) << 2;
+            
+            uint32_t num_m_tiles = (matmul_M + TILE_M - 1) / TILE_M;
+            uint32_t num_k_tiles = (matmul_K + TILE_K - 1) >> 5;
+            uint32_t num_n_tiles = (matmul_N + TILE_N - 1) >> 2;
+            
+            // Dispatch across cores
+            int core_idx = 0;
+            for (uint32_t n = 0; n < num_n_tiles; n++) {
+                for (uint32_t m = 0; m < num_m_tiles; m++) {
+                    uint32_t act_addr = act_base + soft_mul(m, k_pad);
+                    uint32_t wgt_addr = wgt_base + soft_mul((n << 2), k_pad);
+                    uint32_t out_addr = out_base + soft_mul((n << 2), matmul_M) + (m << 2);
+                    
+                    wait_core_idle(core_idx);
+                    
+                    CORE_ACT(core_idx) = act_addr;
+                    CORE_WGT(core_idx) = wgt_addr;
+                    CORE_OUT(core_idx) = out_addr;
+                    CORE_SLIDE(core_idx) = num_k_tiles;
+                    CORE_CTRL(core_idx) = 0x05; // Trigger + Write_Out
+                    
+                    core_idx = core_idx + 1;
+                    if (core_idx >= 10) core_idx = 0;
+                }
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -104,14 +167,14 @@ int main(void) {
     // 1. Setup: Host will pass the queue pointer in register x10 (a0) or x11 (a1).
     // For now, let's assume the Host places the queue at a fixed DDR address 
     // or passes it during boot. We'll use a fixed address for simplicity.
-    uint32_t queue_addr = 0x80000000; // Start of DDR
+    uint32_t queue_addr = 0x1003f000; // TCDM address instead of DDR
     
     // In our Verilator tb, we pass Cluster ID in x10
     int cluster_id;
     __asm__ volatile ("mv %0, x10" : "=r"(cluster_id));
     
-    // Each cluster gets its own queue separated by 1MB
-    queue_addr += cluster_id * 0x100000; 
+    // Each cluster gets its own queue (simplified layout)
+    queue_addr += cluster_id * 0x100; 
     cmd_queue = (volatile npu_cmd_queue_t*)queue_addr;
     
     // Initialize head
@@ -121,7 +184,22 @@ int main(void) {
         // 2. Wait for Host Doorbell
         __asm__ volatile ("wfi");
         
-        // Host rang the doorbell! 
+        // Host rang the doorbell!
+        
+        // Use DMA to pull the command queue from Host DDR (0x80000000) to TCDM (0x1003f000)
+        // Wait for any prior DMA to finish just in case
+        while (DMA_STATUS & 1) {}
+        DMA_SRC = 0x80000000 + cluster_id * 0x100000; // Source in DDR
+        DMA_DST = queue_addr;                         // Dest in TCDM
+        DMA_DIM_X = 2048;                             // Copy 2KB
+        DMA_DIM_Y = 1;
+        DMA_STRIDE_S = 0;
+        DMA_STRIDE_D = 0;
+        DMA_TRIGGER = 1;
+        
+        // Wait for DMA to complete
+        while (DMA_STATUS & 1) {}
+        
         // 3. Process commands
         while (cmd_queue->head != cmd_queue->tail) {
             uint32_t head = cmd_queue->head;
@@ -135,13 +213,20 @@ int main(void) {
                 // Signal success to host
                 MBOX_TRIGGER = 0xA5A5;
                 MBOX_TRIGGER = 2; // Marks Done in ISS
-                // Break to wfi loop
-                cmd_queue->head = (head + 1) % cmd_queue->capacity;
+                head = head + 1;
+                if (head >= cmd_queue->capacity) {
+                    head = 0;
+                }
+                cmd_queue->head = head;
                 break;
             }
             
             // Advance head
-            cmd_queue->head = (head + 1) % cmd_queue->capacity;
+            head = head + 1;
+            if (head >= cmd_queue->capacity) {
+                head = 0;
+            }
+            cmd_queue->head = head;
         }
     }
     

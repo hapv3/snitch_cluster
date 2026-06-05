@@ -28,8 +28,10 @@ SRC = ../../riscv-dbg/src/dm_pkg.sv \
       ../../npu_compute_core/src/npu_mac_array.sv \
       ../../npu_compute_core/src/npu_activation_engine.sv
 
+TEST_FILE ?= tests/test_matmul
+CPP_SRC = npu_testbench.cpp $(TEST_FILE).cpp
+
 all: npu_cluster
 
 npu_cluster:
-	verilator $(VFLAGS) $(PULP_INC) $(VINC) $(SRC) npu_cluster_tb.cpp -Mdir obj_dir_cluster -o Vnpu_cluster_top
-	./obj_dir_cluster/Vnpu_cluster_top
+	verilator $(VFLAGS) $(PULP_INC) $(VINC) $(SRC) $(CPP_SRC) -Mdir obj_dir_cluster -o $(basename $(notdir $(TEST_FILE)))

@@ -33,6 +33,20 @@ module npu_memory_subsystem #(
   input  logic                     axi_r_last_i,
   output logic                     axi_r_ready_o,
 
+  // AXI4 Master Write Interface
+  output logic                     axi_aw_valid_o,
+  output logic [AxiAddrWidth-1:0]  axi_aw_addr_o,
+  output logic [7:0]               axi_aw_len_o,
+  output logic [2:0]               axi_aw_size_o,
+  input  logic                     axi_aw_ready_i,
+  output logic                     axi_w_valid_o,
+  output logic [AxiDataWidth-1:0]  axi_w_data_o,
+  output logic [(AxiDataWidth/8)-1:0] axi_w_strb_o,
+  output logic                     axi_w_last_o,
+  input  logic                     axi_w_ready_i,
+  input  logic                     axi_b_valid_i,
+  output logic                     axi_b_ready_o,
+
   // Direct Requesters (SSR 0, SSR 1, SSR 2, RISC-V Core)
   // Master 0 is DMA internally. Master 1..4 are external.
   input  logic [NumMasters-2:0]                ext_req_valid_i,
@@ -90,13 +104,19 @@ module npu_memory_subsystem #(
     .axi_r_data_i(axi_r_data_i),
     .axi_r_last_i(axi_r_last_i),
     .axi_r_ready_o(axi_r_ready_o),
-    // Write channels ignored for now
-    .axi_aw_ready_i(1'b0),
-    .axi_w_ready_i(1'b0),
-    .axi_b_valid_i(1'b0),
-    .axi_aw_valid_o(), .axi_aw_addr_o(), .axi_aw_len_o(), .axi_aw_size_o(),
-    .axi_w_valid_o(), .axi_w_data_o(), .axi_w_strb_o(), .axi_w_last_o(),
-    .axi_b_ready_o()
+    // Write channels connected
+    .axi_aw_ready_i(axi_aw_ready_i),
+    .axi_w_ready_i(axi_w_ready_i),
+    .axi_b_valid_i(axi_b_valid_i),
+    .axi_aw_valid_o(axi_aw_valid_o), 
+    .axi_aw_addr_o(axi_aw_addr_o), 
+    .axi_aw_len_o(axi_aw_len_o), 
+    .axi_aw_size_o(axi_aw_size_o),
+    .axi_w_valid_o(axi_w_valid_o), 
+    .axi_w_data_o(axi_w_data_o), 
+    .axi_w_strb_o(axi_w_strb_o), 
+    .axi_w_last_o(axi_w_last_o),
+    .axi_b_ready_o(axi_b_ready_o)
   );
 
   // Master 1..4: External Requesters
