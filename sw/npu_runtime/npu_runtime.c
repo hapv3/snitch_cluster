@@ -23,12 +23,15 @@
 #define DMA_STATUS   (*(volatile unsigned int*)(DMA_BASE + 0x1C))
 
 // NPU Cores
-#define CORE_CTRL(c)    (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x00))
-#define CORE_ACT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x04))
-#define CORE_WGT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x08))
-#define CORE_OUT(c)     (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x0c))
-#define CORE_STATUS(c)  (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x10))
-#define CORE_SLIDE(c)   (*(volatile unsigned int*)(NPU_BASE + (c)*0x20 + 0x14))
+#define CORE_ACT(c)         (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x00))
+#define CORE_WGT(c)         (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x04))
+#define CORE_OUT(c)         (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x08))
+#define CORE_SLIDE(c)       (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x0C))
+#define CORE_IMG_WIDTH(c)   (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x10))
+#define CORE_KERNEL_SIZE(c) (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x14))
+#define CORE_STRIDE(c)      (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x18))
+#define CORE_CTRL(c)        (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x1C))
+#define CORE_STATUS(c)      (*(volatile unsigned int*)(NPU_BASE + (c)*0x100 + 0x20))
 
 // Global variables for MatMul configuration (uninitialized -> .bss, zero by start.S)
 uint32_t matmul_M;
@@ -37,7 +40,7 @@ uint32_t matmul_N;
 
 // Utility Functions
 static void wait_core_idle(int core) {
-    while (CORE_STATUS(core) & 1) {}
+    while (((CORE_STATUS(core) >> 24) & 0xF) != 0) {}
 }
 
 static void wait_dma_idle(void) {
@@ -89,27 +92,40 @@ void execute_op(const npu_cmd_t* cmd) {
             for(int i=0; i<10; i++) wait_core_idle(i);
             break;
             
-        case OP_COMPUTE_CONV2D:
-        case OP_COMPUTE_ACT_SILU:
-        case OP_COMPUTE_ACT_MISH:
-        case OP_COMPUTE_ACT_SIGMOID: {
-            // Distribute work to cores (simplified: just core 0 for now)
-            int act_code = 0;
-            if (cmd->opcode == OP_COMPUTE_ACT_SILU) act_code = (5 << 8);
-            else if (cmd->opcode == OP_COMPUTE_ACT_MISH) act_code = (6 << 8);
-            else if (cmd->opcode == OP_COMPUTE_ACT_SIGMOID) act_code = (3 << 8);
+        case OP_COMPUTE_MAXPOOL: {
+            uint32_t act_addr = cmd->args.compute.act_addr;
+            uint32_t width = cmd->args.compute.wgt_addr & 0xFF;
+            uint32_t height = (cmd->args.compute.wgt_addr >> 8) & 0xFF;
+            uint32_t kernel_size = (cmd->args.compute.wgt_addr >> 16) & 0xFF;
+            uint32_t stride = (cmd->args.compute.wgt_addr >> 24) & 0xFF;
+            uint32_t out_addr = cmd->args.compute.out_addr;
             
-            CORE_ACT(0) = cmd->args.compute.act_addr;
-            CORE_WGT(0) = cmd->args.compute.wgt_addr;
-            CORE_OUT(0) = cmd->args.compute.out_addr;
-            CORE_SLIDE(0) = 0;
-            CORE_CTRL(0) = act_code | 0x05; // trigger + write_out
+            // If height is 0, assume square image
+            if (height == 0) height = width;
+
+            uint32_t out_w, out_h;
+            if (stride == 2) {
+                out_w = ((width - kernel_size) >> 1) + 1;
+                out_h = ((height - kernel_size) >> 1) + 1;
+            } else {
+                out_w = (width - kernel_size) + 1;
+                out_h = (height - kernel_size) + 1;
+            }
+            uint32_t max_slides = soft_mul(out_w, out_h);
+
+            int core_idx = 0;
+            wait_core_idle(core_idx);
+            
+            CORE_ACT(core_idx) = act_addr;
+            CORE_WGT(core_idx) = 0;
+            CORE_OUT(core_idx) = out_addr;
+            CORE_SLIDE(core_idx) = (max_slides << 16) | out_w;
+            CORE_IMG_WIDTH(core_idx) = width;
+            CORE_KERNEL_SIZE(core_idx) = kernel_size;
+            CORE_STRIDE(core_idx) = stride;
+            CORE_CTRL(core_idx) = (7 << 8) | 0x05; // ACT_POOL=7, Trigger+WriteOut=5
             break;
         }
-            
-        case OP_FW_MAXPOOL:
-            // TODO: Call maxpool firmware loop
-            break;
             
         case OP_CFG_MATMUL: { // 0x34
             matmul_M = cmd->args.fw_op.arg0;
@@ -117,8 +133,17 @@ void execute_op(const npu_cmd_t* cmd) {
             matmul_N = cmd->args.fw_op.arg2;
             break;
         }
-            
+
+        case OP_COMPUTE_CONV2D:
+        case OP_COMPUTE_ACT_SILU:
+        case OP_COMPUTE_ACT_MISH:
+        case OP_COMPUTE_ACT_SIGMOID:
         case OP_COMPUTE_MATMUL: { // 0x35
+            int act_code = 0;
+            if (cmd->opcode == OP_COMPUTE_ACT_SILU) act_code = (5 << 8);
+            else if (cmd->opcode == OP_COMPUTE_ACT_MISH) act_code = (6 << 8);
+            else if (cmd->opcode == OP_COMPUTE_ACT_SIGMOID) act_code = (3 << 8);
+
             uint32_t act_base = cmd->args.compute.act_addr;
             uint32_t wgt_base = cmd->args.compute.wgt_addr;
             uint32_t out_base = cmd->args.compute.out_addr;
@@ -149,7 +174,7 @@ void execute_op(const npu_cmd_t* cmd) {
                     CORE_WGT(core_idx) = wgt_addr;
                     CORE_OUT(core_idx) = out_addr;
                     CORE_SLIDE(core_idx) = num_k_tiles;
-                    CORE_CTRL(core_idx) = 0x05; // Trigger + Write_Out
+                    CORE_CTRL(core_idx) = act_code | 0x05; // Trigger + Write_Out
                     
                     core_idx = core_idx + 1;
                     if (core_idx >= 10) core_idx = 0;
@@ -184,7 +209,8 @@ int main(void) {
         // 2. Wait for Host Doorbell
         __asm__ volatile ("wfi");
         
-        // Host rang the doorbell!
+        // Host rang the doorbell! Clear the pending interrupt so wfi doesn't fall through
+        MBOX_TRIGGER = 1;
         
         // Use DMA to pull the command queue from Host DDR (0x80000000) to TCDM (0x1003f000)
         // Wait for any prior DMA to finish just in case

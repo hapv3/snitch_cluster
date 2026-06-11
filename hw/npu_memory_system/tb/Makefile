@@ -20,3 +20,7 @@ run: build
 
 clean:
 	rm -rf obj_dir
+
+.PHONY: clean
+clean:
+	rm -rf obj_dir* *.log *.vcd test_*

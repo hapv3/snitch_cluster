@@ -11,3 +11,7 @@ smoke:
 
 clean:
 	rm -rf obj_dir_mobilenet obj_dir_yolo obj_dir_smoke
+
+.PHONY: clean
+clean:
+	rm -rf obj_dir* *.log *.vcd test_*

@@ -238,7 +238,6 @@ module npu_core_wrapper import npu_compute_core_pkg::*; #(
       FETCH_ACT: begin
         if (reg_ctrl[10:8] == 7) begin // ACT_POOL
           automatic logic [15:0] ks = reg_kernel_size;
-          automatic logic [15:0] words_to_fetch = ((ks * ks) + 3) >> 2;
           if (fetch_cnt_q < words_to_fetch) begin
             automatic logic [31:0] relative_offset = fetch_cnt_q * 4;
             automatic logic [31:0] window_row = relative_offset / ks;

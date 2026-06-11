@@ -27,7 +27,8 @@ package npu_compute_core_pkg;
     ACT_SIGMOID    = 3'b011, // Hardware LUT
     ACT_LEAKY_RELU = 3'b100, // alpha ≈ 0.125 (>>3)
     ACT_SILU       = 3'b101, // Hardware LUT
-    ACT_MISH       = 3'b110  // Hardware LUT
+    ACT_MISH       = 3'b110, // Hardware LUT
+    ACT_POOL       = 3'b111  // Hardware MaxPool
   } act_type_e;
 
   /// Configuration structure for a compute core
@@ -36,6 +37,7 @@ package npu_compute_core_pkg;
     logic [31:0] output_scale;
     logic [31:0] output_zero_point;
     logic [7:0]  shift_amount;
+    logic [7:0]  kernel_size;
   } core_cfg_t;
 
 endpackage

@@ -1,4 +1,4 @@
-#include "../npu_testbench.h"
+#include "test_utils.h"
 #include "../../../../sw/npu_driver/npu_mmio.h"
 #include <iostream>
 #include <vector>
@@ -6,105 +6,82 @@
 
 using namespace std;
 
-// Generate simple golden reference for Depthwise
-// Assume M=1, N=1, K=1 for simplicity, or just vector dot product if larger
-void compute_golden_conv2d(const vector<uint32_t>& act, const vector<uint32_t>& wgt, vector<uint32_t>& out, int size) {
-    for (int i = 0; i < size; i++) {
-        // Mock MAC operation (actually just addition in some mock RTL, but let's assume it adds them for now)
-        // Wait, the real MAC array multiplies 8-bit or 16-bit. 
-        // Our RTL is a mock that might just output something specific.
-        // For Golden Matching in RTL without a real MAC array model, we just verify it didn't hang
-        // and wrote *something* to the output address.
-        // Let's assume the RTL writes some deterministic value.
-        // Actually, let's just make it a basic test that checks if data was written back via DMA.
-        out[i] = 0; // We'll just check if it changed from 0 for the mock
-    }
-}
-
 int main(int argc, char** argv) {
     NpuClusterTestbench tb(argc, argv, true);
-
-    // Initialize DRAM (1MB)
     tb.init_dram(0x80000000, 1024 * 1024);
 
-    // Write some dummy data for Activations and Weights
-    for (int i = 0; i < 16; i++) {
-        tb.write_dram(0x80001000 + i*4, i + 1); // Activations
-        tb.write_dram(0x80002000 + i*4, 0x10 + i); // Weights
+    auto write_dram_8 = [&](uint32_t addr, uint8_t val) {
+        uint32_t word_addr = addr & ~3;
+        uint32_t offset = addr & 3;
+        uint32_t word = tb.read_dram(word_addr);
+        word &= ~(0xFF << (offset * 8));
+        word |= (val << (offset * 8));
+        tb.write_dram(word_addr, word);
+    };
+
+    auto read_dram_8 = [&](uint32_t addr) -> uint8_t {
+        uint32_t word_addr = addr & ~3;
+        uint32_t offset = addr & 3;
+        uint32_t word = tb.read_dram(word_addr);
+        return (word >> (offset * 8)) & 0xFF;
+    };
+
+    uint32_t M = 1;
+    uint32_t K = 32;
+    uint32_t N = 4;
+
+    uint32_t act_addr = 0x80001000;
+    uint32_t wgt_addr = 0x80002000;
+    uint32_t out_addr = 0x80003000;
+
+    for (uint32_t k = 0; k < K; k++) write_dram_8(act_addr + k, k + 1);
+    for (uint32_t n = 0; n < N; n++) {
+        for (uint32_t k = 0; k < K; k++) write_dram_8(wgt_addr + n * K + k, 1);
     }
+    for (uint32_t i = 0; i < M * N; i++) write_dram_8(out_addr + i, 0);
 
-    // Prepare Command Queue in DRAM
     uint32_t queue_addr = 0x80000000;
-    
-    // Write Header (head=0, tail=5, capacity=10, flags=0)
-    tb.write_dram(queue_addr + 0, 0); // head
-    tb.write_dram(queue_addr + 4, 5); // tail
-    tb.write_dram(queue_addr + 8, 10); // capacity
-    tb.write_dram(queue_addr + 12, 0); // flags
+    uint32_t cmd_idx = 0;
+    uint32_t cmd_base = 0x80000010;
 
-    uint32_t cmd_base = queue_addr + 16;
-
-    // Helper to write command
-    auto write_cmd = [&](int idx, uint8_t opcode, uint32_t arg0, uint32_t arg1, uint32_t arg2) {
+    auto write_cmd = [&](uint32_t idx, uint8_t opcode, uint32_t arg0, uint32_t arg1, uint32_t arg2) {
         uint32_t addr = cmd_base + idx * 16;
-        uint32_t word0 = opcode | (0 << 8) | (0 << 16); // opcode, flags, cluster_id
-        tb.write_dram(addr + 0, word0);
+        tb.write_dram(addr + 0, opcode | (0 << 8) | (0 << 16));
         tb.write_dram(addr + 4, arg0);
         tb.write_dram(addr + 8, arg1);
         tb.write_dram(addr + 12, arg2);
     };
 
-    // CMD 0: DMA Read Activations
-    write_cmd(0, OP_DMA_READ, 0x80001000, 0x10000000, 64);
+    uint32_t tcdm_act = 0x10000000;
+    uint32_t tcdm_wgt = 0x10000100;
+    uint32_t tcdm_out = 0x10000200;
     
-    // CMD 1: DMA Read Weights
-    write_cmd(1, OP_DMA_READ, 0x80002000, 0x10000100, 64);
-    
-    // CMD 2: Compute Depthwise
-    write_cmd(2, OP_COMPUTE_CONV2D, 0x10000000, 0x10000100, 0x10000200);
-    
-    // CMD 3: Wait Compute
-    write_cmd(3, OP_WAIT_COMPUTE, 0, 0, 0);
-    
-    // CMD 4: DMA Write Output
-    write_cmd(4, OP_DMA_WRITE, 0x80003000, 0x10000200, 64);
-    
-    // CMD 5: FINISH
-    write_cmd(5, OP_FINISH, 0, 0, 0);
+    write_cmd(cmd_idx++, OP_DMA_READ, act_addr, tcdm_act, K);
+    write_cmd(cmd_idx++, OP_DMA_READ, wgt_addr, tcdm_wgt, N * K);
+    write_cmd(cmd_idx++, 0x34, M, K, N);
+    write_cmd(cmd_idx++, OP_COMPUTE_CONV2D, tcdm_act, tcdm_wgt, tcdm_out);
+    write_cmd(cmd_idx++, OP_WAIT_COMPUTE, 0, 0, 0);
+    write_cmd(cmd_idx++, OP_DMA_WRITE, out_addr, tcdm_out, M * N);
+    write_cmd(cmd_idx++, OP_FINISH, 0, 0, 0);
 
-    tb.reset();
+    setup_cmd_queue(tb, queue_addr, cmd_idx, 10);
 
-    // Load universal runtime firmware
-    if (!tb.load_firmware("../../../sw/npu_runtime/npu_runtime.bin")) {
-        return 1;
-    }
+    cout << "[TEST] Running Depthwise..." << endl;
+    if (!run_firmware(tb, "../../../sw/npu_runtime/npu_runtime.bin")) return 1;
 
-    tb.reset(); // Restart firmware
-
-    // Ring doorbell (Host sends trigger to Mailbox)
-    tb.axi_lite_write(0x40000004, 1);
-
-    // Wait for completion
-    bool success = tb.wait_for_interrupt(20000);
-
-    if (success) {
-        cout << "[TEST] Depthwise executed successfully." << endl;
-        // Verify DMA write back occurred
-        bool data_written = false;
-        for (int i = 0; i < 16; i++) {
-            uint32_t val = tb.read_dram(0x80003000 + i*4);
-            if (val != 0) {
-                data_written = true;
-                break;
-            }
-        }
-        if (data_written) {
-            cout << "[TEST] Golden Match: PASSED (Output data detected in DRAM)" << endl;
-        } else {
-            cout << "[TEST] Golden Match: FAILED (No output data in DRAM)" << endl;
+    bool success = true;
+    for (uint32_t n = 0; n < N; n++) {
+        int8_t actual = read_dram_8(out_addr + n);
+        int32_t expected = 0;
+        for (uint32_t k = 0; k < K; k++) expected += (k + 1) * 1;
+        int8_t expected_clipped = expected > 127 ? 127 : (expected < -128 ? -128 : expected);
+        if (actual != expected_clipped) {
+            cout << "[TEST] Mismatch at N=" << n << " | Expected: " << (int)expected_clipped << " Actual: " << (int)actual << endl;
             success = false;
         }
     }
 
+    if (success) cout << "[TEST] Golden Match: PASSED!" << endl;
+    else cout << "[TEST] Golden Match: FAILED!" << endl;
     return success ? 0 : 1;
 }

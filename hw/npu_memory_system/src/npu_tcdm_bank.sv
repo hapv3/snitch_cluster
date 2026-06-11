@@ -30,7 +30,8 @@ module npu_tcdm_bank #(
         if (be_i[3]) mem[addr_i][31:24] <= wdata_i[31:24];
       end
       // Single-port behavior: read returns new data if writing, or old data if reading
-      rdata_o <= mem[addr_i]; 
+      rdata_o <= mem[addr_i];
+      $display("[%0t] [BANK] READ addr=%x data=%x", $time, addr_i, mem[addr_i]); 
     end
   end
 

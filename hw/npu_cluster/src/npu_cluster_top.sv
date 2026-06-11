@@ -173,8 +173,8 @@ module npu_cluster_top #(
         // Broadcast
         core_mmio_req_valid = cluster_core_mask_q[NumCores-1:0];
       end else if (ctrl_tcdm_req_addr < 32'h6000_0F00) begin
-        // Unicast (stride 0x20 per core)
-        automatic int core_idx = (ctrl_tcdm_req_addr - 32'h6000_0000) / 32;
+        // Unicast (stride 0x100 per core)
+        automatic int core_idx = (ctrl_tcdm_req_addr - 32'h6000_0000) / 256;
         if (core_idx < NumCores) begin
           core_mmio_req_valid[core_idx] = 1'b1;
         end
@@ -362,7 +362,7 @@ module npu_cluster_top #(
       .rst_ni(rst_ni),
       .mmio_req_valid_i(core_mmio_req_valid[i]),
       .mmio_req_write_i(ctrl_tcdm_req_write),
-      .mmio_req_addr_i({27'd0, ctrl_tcdm_req_addr[4:0]}),
+      .mmio_req_addr_i({24'd0, ctrl_tcdm_req_addr[7:0]}),
       .mmio_req_data_i(ctrl_tcdm_req_data),
       .mmio_req_ready_o(core_mmio_req_ready[i]),
       .mmio_rsp_valid_o(core_mmio_rsp_valid[i]),

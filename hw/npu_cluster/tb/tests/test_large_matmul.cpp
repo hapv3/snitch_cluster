@@ -102,9 +102,16 @@ int main(int argc, char** argv) {
     for (uint32_t j = 0; j < size_C; j += 4) tb.write_dram(out_addr + j, 0);
     
     // CFG & COMPUTE LARGE
+    uint32_t tcdm_act = 0x10000000;
+    uint32_t tcdm_wgt = tcdm_act + ((size_A + 4095) & ~4095);
+    uint32_t tcdm_out = tcdm_wgt + ((size_B + 4095) & ~4095);
+    
+    write_cmd(tb, cmd_base, cmd_idx++, OP_DMA_READ, act_addr, tcdm_act, size_A);
+    write_cmd(tb, cmd_base, cmd_idx++, OP_DMA_READ, wgt_addr, tcdm_wgt, size_B);
     write_cmd(tb, cmd_base, cmd_idx++, 0x34, M, K, N); // OP_CFG_MATMUL
-    write_cmd(tb, cmd_base, cmd_idx++, 0x36, act_addr, wgt_addr, out_addr); // OP_COMPUTE_MATMUL_LARGE
+    write_cmd(tb, cmd_base, cmd_idx++, 0x35, tcdm_act, tcdm_wgt, tcdm_out); // OP_COMPUTE_MATMUL
     write_cmd(tb, cmd_base, cmd_idx++, OP_WAIT_COMPUTE, 0, 0, 0);
+    write_cmd(tb, cmd_base, cmd_idx++, OP_DMA_WRITE, out_addr, tcdm_out, size_C);
     write_cmd(tb, cmd_base, cmd_idx++, OP_FINISH, 0, 0, 0);
     
     uint32_t queue_addr = 0x80000000;

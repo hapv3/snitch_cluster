@@ -35,3 +35,7 @@ all: npu_cluster
 
 npu_cluster:
 	verilator $(VFLAGS) $(PULP_INC) $(VINC) $(SRC) $(CPP_SRC) -Mdir obj_dir_cluster -o $(basename $(notdir $(TEST_FILE)))
+
+.PHONY: clean
+clean:
+	rm -rf obj_dir* *.log *.vcd test_*

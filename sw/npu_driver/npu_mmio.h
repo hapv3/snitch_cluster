@@ -46,9 +46,9 @@ typedef enum {
     OP_CFG_MATMUL        = 0x34, // Configure MatMul sizes (M, K, N)
     OP_COMPUTE_MATMUL    = 0x35, // Trigger tiled MatMul
     OP_COMPUTE_MATMUL_LARGE = 0x36, // Trigger Outer-Tiled Large MatMul
+    OP_COMPUTE_MAXPOOL   = 0x37, // Trigger hardware MaxPool engine
     
     // Firmware Fallback Operations (Executed by RISC-V Firmware)
-    OP_FW_MAXPOOL    = 0x40,
     OP_FW_SOFTMAX    = 0x41,
     OP_FW_RESIZE_NN  = 0x42,
     OP_FW_SLICE      = 0x43,

@@ -16,3 +16,7 @@ clean:
 	rm -rf obj_dir work_verilator *.vcd *.log
 
 .PHONY: all sim clean
+
+.PHONY: clean
+clean:
+	rm -rf obj_dir* *.log *.vcd test_*

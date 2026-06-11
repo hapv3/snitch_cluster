@@ -56,9 +56,25 @@ module npu_compute_core import npu_compute_core_pkg::*; (
     .act_o       ( act_data    )
   );
 
+  // 3. Pooling Engine Instantiation
+  logic pool_valid;
+  logic signed [7:0] pool_max;
+  logic pool_ready;
+
+  npu_pooling_engine i_pooling_engine (
+    .clk_i       ( clk_i       ),
+    .rst_ni      ( rst_ni      ),
+    .cfg_i       ( cfg_i       ),
+    .valid_i     ( valid_i     ),
+    .act_i       ( act_i       ),
+    .ready_o     ( pool_ready  ),
+    .valid_o     ( pool_valid  ),
+    .max_o       ( pool_max    )
+  );
+
   // Output routing
-  assign valid_o = act_valid;
-  assign act_o   = {act_data[3], act_data[2], act_data[1], act_data[0]};
-  assign ready_o = mac_ready && act_ready; // Backpressure propagation
+  assign valid_o = (cfg_i.act_type == ACT_POOL) ? pool_valid : act_valid;
+  assign act_o   = (cfg_i.act_type == ACT_POOL) ? {24'd0, pool_max} : {act_data[3], act_data[2], act_data[1], act_data[0]};
+  assign ready_o = (cfg_i.act_type == ACT_POOL) ? pool_ready : (mac_ready && act_ready);
 
 endmodule

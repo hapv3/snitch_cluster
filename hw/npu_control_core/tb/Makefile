@@ -20,3 +20,7 @@ clean:
 	$(MAKE) -C fw clean
 
 .PHONY: all sim fw clean
+
+.PHONY: clean
+clean:
+	rm -rf obj_dir* *.log *.vcd test_*

@@ -1,4 +1,4 @@
-#include "../npu_testbench.h"
+#include "test_utils.h"
 #include "../../../../sw/npu_driver/npu_mmio.h"
 #include <iostream>
 #include <vector>
@@ -33,16 +33,8 @@ int main(int argc, char** argv) {
         tb.write_dram(0x80002000 + i*4, 0x10 + i); // Weights
     }
 
-    // Prepare Command Queue in DRAM
     uint32_t queue_addr = 0x80000000;
-    
-    // Write Header (head=0, tail=5, capacity=10, flags=0)
-    tb.write_dram(queue_addr + 0, 0); // head
-    tb.write_dram(queue_addr + 4, 5); // tail
-    tb.write_dram(queue_addr + 8, 10); // capacity
-    tb.write_dram(queue_addr + 12, 0); // flags
-
-    uint32_t cmd_base = queue_addr + 16;
+    uint32_t cmd_base = setup_cmd_queue(tb, queue_addr, 6, 10);
 
     // Helper to write command
     auto write_cmd = [&](int idx, uint8_t opcode, uint32_t arg0, uint32_t arg1, uint32_t arg2) {
@@ -72,20 +64,7 @@ int main(int argc, char** argv) {
     // CMD 5: FINISH
     write_cmd(5, OP_FINISH, 0, 0, 0);
 
-    tb.reset();
-
-    // Load universal runtime firmware
-    if (!tb.load_firmware("../../../sw/npu_runtime/npu_runtime.bin")) {
-        return 1;
-    }
-
-    tb.reset(); // Restart firmware
-
-    // Ring doorbell (Host sends trigger to Mailbox)
-    tb.axi_lite_write(0x40000004, 1);
-
-    // Wait for completion
-    bool success = tb.wait_for_interrupt(20000);
+    bool success = run_firmware(tb, "../../../sw/npu_runtime/npu_runtime.bin");
 
     if (success) {
         cout << "[TEST] Yolo_SiLU executed successfully." << endl;

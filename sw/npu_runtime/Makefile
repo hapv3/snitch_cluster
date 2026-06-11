@@ -2,7 +2,7 @@
 
 CC      = riscv64-unknown-elf-gcc
 OBJCOPY = riscv64-unknown-elf-objcopy
-CFLAGS  = -march=rv32ima -mabi=ilp32 -O2 -nostdlib -fno-builtin -fno-jump-tables
+CFLAGS  = -march=rv32ia -mabi=ilp32 -O2 -nostdlib -fno-builtin -fno-jump-tables
 
 all: npu_runtime.bin
 
